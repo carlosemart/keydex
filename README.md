@@ -76,9 +76,12 @@ aplicación, ni una capa de bindings multi-lenguaje. Ver `AGENTS.md`.
 
 ```bash
 ./scripts/check.sh     # fmt + clippy
-cargo test --workspace
+cargo test --workspace --exclude keydex-py
 ./scripts/gate.sh      # invariantes de arquitectura
 ```
+
+`scripts/gate.sh` avisa y se salta `cargo deny` si no está instalado. Para tener paridad
+con CI: `cargo install cargo-deny --locked`.
 
 ## Licencia
 
