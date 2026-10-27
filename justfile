@@ -17,3 +17,11 @@ gate:
 # Apply formatting
 fmt:
     cargo fmt --all
+
+# Build the docs for Python and Rust
+docs:
+    ./scripts/docs.sh
+
+# Live preview of the Python docs site
+docs-serve:
+    ./scripts/docs.sh serve

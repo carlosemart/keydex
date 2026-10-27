@@ -51,7 +51,8 @@ cargo test --workspace --exclude keydex-py
 Documentation:
 
 ```
-RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features -p keydex-core
+./scripts/docs.sh       # build site/ (mkdocs) and target/doc/ (rustdoc)
+./scripts/docs.sh serve # live preview on http://127.0.0.1:8000
 mkdocs build --strict   # needs mkdocs-material, mkdocstrings[python] and ruff
 ```
 

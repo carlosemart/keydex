@@ -163,6 +163,10 @@ The published site is built from `docs/` with mkdocs-material and mkdocstrings
 (`mkdocs build --strict`); the Rust side is rustdoc, with two runnable examples:
 
 ```bash
+./scripts/docs.sh          # builds both: site/ and target/doc/
+./scripts/docs.sh serve    # live preview on http://127.0.0.1:8000
+./scripts/docs.sh rust     # Rust API docs in the browser
+
 cargo run -p keydex-core --example basic
 cargo run -p keydex-core --example schema
 ```
