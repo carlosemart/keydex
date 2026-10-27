@@ -167,8 +167,12 @@ multi-language binding layer. See `AGENTS.md`.
 
 ## Documentation
 
+- [Install](docs/install.md)
 - [Python guide](docs/python.md)
 - [Rust guide](docs/rust.md)
+- [Architecture](docs/architecture.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Status: what exists and what does not](docs/status.md)
 - [Specification](docs/spec.md)
 - [Architecture decisions](docs/adr/)
 - [Agent instructions](AGENTS.md)

@@ -37,6 +37,7 @@ crates/keydex-core  pure engine: sources, precedence, merge, interp, coercion
 crates/keydex-py    PyO3 binding (F1), publish = false
 python/keydex       public API, types and integrations (F1)
 docs/spec.md        current specification
+docs/architecture.md  how the pieces fit (read before refactors)
 docs/adr/           irreversible decisions
 ```
 

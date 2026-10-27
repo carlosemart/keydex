@@ -61,6 +61,14 @@ First functional release. `0.0.1` was only a name reservation.
   `refresh()` swaps the pointer (ADR 0008).
 - The benchmark now measures the typed path too (200 fields, 1.23 ms).
 
+### Documentation
+
+- New [architecture](docs/architecture.md) page: component diagram, module
+  responsibilities, load lifecycle, data model, extension seams and cross-cutting concerns.
+- New [status](docs/status.md), [install](docs/install.md),
+  [troubleshooting](docs/troubleshooting.md), [migration](docs/migration.md) and
+  [contributing](docs/contributing.md) pages, so the guides stop duplicating the same facts.
+
 ### Known limitations
 
 - `imports:` / `includes:` not implemented (see specification §9.3).
