@@ -13,13 +13,19 @@ homepage.workspace = true
 authors.workspace = true
 
 [features]
-default = ["yaml", "toml", "json"]
+default = ["yaml", "toml", "json", "schema"]
 yaml = ["dep:saphyr"]
 toml = ["dep:toml_edit"]
 json = ["dep:jsonc-parser"]
+schema = ["dep:serde", "dep:serde_json"]
 
 [dependencies]
 thiserror.workspace = true
 saphyr = { version = "0.3.3", optional = true }
 toml_edit = { version = "0.25.17", optional = true }
 jsonc-parser = { version = "0.34.0", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[dev-dependencies]
+serde_json = "1"

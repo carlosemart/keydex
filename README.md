@@ -18,14 +18,40 @@ uv pip install -e .
 ## Uso
 
 ```python
+from dataclasses import dataclass, field
 import keydex
 
-cfg = keydex.load(["config/app.yaml"], env_prefix="APP_")
+@dataclass(frozen=True)
+class Db:
+    host: str
+    port: int = 5432
 
-cfg["db.host"]              # valor ya resuelto y con el tipo correcto
-cfg.get("db.port", 5432)    # con default
-cfg.explain("db.host")      # quién lo definió, quién lo sombreó y qué usó
-cfg.keys()
+@dataclass(frozen=True)
+class App:
+    db: Db
+    debug: bool = False
+    tags: list[str] = field(default_factory=list)
+
+# Tipado: valida, coacciona y devuelve el modelo
+cfg = keydex.load(App, files=["config/app.yaml"], env_prefix="APP_")
+cfg.db.port        # int de verdad, no "5432"
+
+# Diccionario: sin modelo, con procedencia
+raw = keydex.load_settings(files=["config/app.yaml"], env_prefix="APP_")
+raw["db.host"]
+raw.explain("db.host")
+```
+
+`APP_DB_HOST` casa con `db.host` sin necesidad de `__`: el esquema desambigua.
+
+Los errores se agregan, no se aborta en el primero:
+
+```python
+try:
+    keydex.load(App, files=["config/app.yaml"], env_prefix="APP_")
+except keydex.ValidationError as error:
+    error.errors
+    # [{"path": "db.port", "message": "se esperaba un entero, llegó \"muchos\""}]
 ```
 
 El `explain` devuelve una estructura, no un texto:

@@ -66,4 +66,13 @@ pub enum Error {
         /// Fragmento ofensor.
         snippet: String,
     },
+
+    /// Dos rutas del esquema empatan para la misma variable de entorno.
+    #[error("binding ambiguo para {env_var}: {candidates:?}")]
+    AmbiguousBinding {
+        /// Variable de entorno implicada.
+        env_var: String,
+        /// Rutas del esquema que empatan.
+        candidates: Vec<String>,
+    },
 }

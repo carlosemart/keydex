@@ -13,12 +13,14 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use keydex_core::{Builder, Error, Explanation, Format, Provenance, Snapshot, Tier, Value};
+use keydex_core::{
+    Builder, Error, Explanation, Format, Provenance, Schema, Snapshot, Tier, Value, coerce,
+};
 use pyo3::IntoPyObjectExt;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyKeyError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList};
 
 create_exception!(keydex, KeydexError, PyException);
 
@@ -115,6 +117,84 @@ fn load(
     })
 }
 
+#[pyfunction]
+#[pyo3(signature = (ir, files, env_prefix = "", env = None))]
+/// Carga con esquema: aplica binding relajado, coacciona y valida.
+///
+/// Devuelve `(True, arbol)` o `(False, errores)`. La capa de Python decide qué excepción
+/// lanzar; el motor no conoce las clases de excepción de Python.
+fn load_typed(
+    py: Python<'_>,
+    ir: &str,
+    files: Vec<String>,
+    env_prefix: &str,
+    env: Option<HashMap<String, String>>,
+) -> PyResult<(bool, Py<PyAny>)> {
+    let schema = Schema::from_json(ir).map_err(to_py_err)?;
+
+    let environment: BTreeMap<String, String> = match env {
+        Some(map) => map.into_iter().collect(),
+        None => std::env::vars().collect(),
+    };
+
+    let mut builder = Builder::new().with_env(environment);
+    builder
+        .schema_env_source(&schema, env_prefix, Tier::Environment)
+        .map_err(to_py_err)?;
+
+    for path in files {
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|err| KeydexError::new_err(format!("{path}: {err}")))?;
+        let format = Format::from_path(&path)
+            .ok_or_else(|| KeydexError::new_err(format!("formato desconocido para {path}")))?;
+        builder
+            .document(&path, &contents, format, Tier::BaseFile)
+            .map_err(to_py_err)?;
+    }
+
+    let snapshot = builder.build().map_err(to_py_err)?;
+
+    match coerce(&snapshot, &schema) {
+        Ok(tree) => Ok((true, json_to_py(py, &tree)?)),
+        Err(errors) => {
+            let list = PyList::empty(py);
+            for error in &errors {
+                let dict = PyDict::new(py);
+                dict.set_item("path", &error.path)?;
+                dict.set_item("message", &error.message)?;
+                list.append(dict)?;
+            }
+            Ok((false, list.into_any().unbind()))
+        }
+    }
+}
+
+fn json_to_py(py: Python<'_>, value: &serde_json::Value) -> PyResult<Py<PyAny>> {
+    Ok(match value {
+        serde_json::Value::Null => py.None(),
+        serde_json::Value::Bool(b) => b.into_py_any(py)?,
+        serde_json::Value::Number(number) => match number.as_i64() {
+            Some(integer) => integer.into_py_any(py)?,
+            None => number.as_f64().unwrap_or_default().into_py_any(py)?,
+        },
+        serde_json::Value::String(text) => text.into_py_any(py)?,
+        serde_json::Value::Array(items) => {
+            let list = PyList::empty(py);
+            for item in items {
+                list.append(json_to_py(py, item)?)?;
+            }
+            list.into_any().unbind()
+        }
+        serde_json::Value::Object(map) => {
+            let dict = PyDict::new(py);
+            for (key, item) in map {
+                dict.set_item(key, json_to_py(py, item)?)?;
+            }
+            dict.into_any().unbind()
+        }
+    })
+}
+
 fn to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> {
     Ok(match value {
         Value::Null => py.None(),
@@ -170,6 +250,7 @@ fn explanation_to_py(py: Python<'_>, explanation: &Explanation) -> PyResult<Py<P
 fn _keydex(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PySettings>()?;
     module.add_function(wrap_pyfunction!(load, module)?)?;
+    module.add_function(wrap_pyfunction!(load_typed, module)?)?;
     module.add("KeydexError", module.py().get_type::<KeydexError>())?;
     module.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())

@@ -19,6 +19,11 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
   PyO3 en modo diccionario (`keydex.load`, `Settings`).
 - Benchmark de carga: 1,26 ms para 1004 claves, 21× más rápido que OmegaConf
   ([detalle](docs/benchmarks.md)).
+- **F2**: modelos tipados. Schema IR v1 (Python → Rust), coerción y validación
+  agregada en el motor, binder relajado contra el esquema (`APP_DB_HOST` → `db.host`
+  sin `__`), `keydex.load(Modelo)` y `ValidationError` con `errors` por ruta.
+  Convertidores ricos (`Enum`, `Path`, `Decimal`, `UUID`) en la capa de Python.
+  ADR [0007](docs/adr/0007-schema-ir-con-serde.md).
 
 ## [0.0.1] - 2026-10-27
 

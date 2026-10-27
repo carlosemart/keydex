@@ -72,6 +72,18 @@ impl Snapshot {
             .map(|(key, entry)| (key.as_str(), &entry.value))
     }
 
+    /// Claves que empiezan por un prefijo, en orden lexicográfico.
+    ///
+    /// Se usa para reconstruir listas a partir de las claves aplanadas (`servers[0]`,
+    /// `servers[1]`, …).
+    pub fn keys_with_prefix<'a>(&'a self, prefix: &str) -> impl Iterator<Item = &'a str> + 'a {
+        let start = prefix.to_string();
+        self.entries
+            .range(start.clone()..)
+            .take_while(move |(key, _)| key.starts_with(&start))
+            .map(|(key, _)| key.as_str())
+    }
+
     /// Procedencia de una clave: quién ganó, quién fue sombreado y qué referencias usó.
     #[must_use]
     pub fn explain(&self, key: &str) -> Option<Explanation> {

@@ -10,7 +10,7 @@ use crate::error::Result;
 use crate::interp;
 use crate::parse::{self, Format};
 use crate::snapshot::{Resolved, Snapshot};
-use crate::source::{RawSource, SourceId, Tier};
+use crate::source::{RawEntry, RawSource, SourceId, Tier};
 use crate::value::{Provenance, Value};
 
 /// Constructor de snapshots.
@@ -50,6 +50,38 @@ impl Builder {
             entries,
         });
         self
+    }
+
+    /// Añade una fuente de entorno con **binding relajado contra el esquema**.
+    ///
+    /// A diferencia de [`Builder::env_source`], aquí `APP_DB_HOST` casa con `db.host`
+    /// sin necesidad de `__`: el esquema desambigua.
+    #[cfg(feature = "schema")]
+    pub fn schema_env_source(
+        &mut self,
+        schema: &crate::schema::Schema,
+        prefix: &str,
+        tier: Tier,
+    ) -> Result<&mut Self> {
+        let bindings = crate::schema::bind_env(&schema.root, &self.env, prefix)?;
+        let entries = bindings
+            .into_iter()
+            .map(|(path, value)| RawEntry {
+                path,
+                value: Value::str(value),
+                span: None,
+            })
+            .collect();
+        let order = self.take_order();
+        self.sources.push(RawSource {
+            id: SourceId {
+                name: String::from("env"),
+                tier,
+                order,
+            },
+            entries,
+        });
+        Ok(self)
     }
 
     /// Añade un documento ya leído en memoria.

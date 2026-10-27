@@ -323,28 +323,29 @@ que se mantiene estable.
 ```json
 {
   "ir": "keydex.schema/v1",
-  "root": "App",
-  "prefix": "APP_",
-  "types": {
-    "App": {
-      "kind": "struct",
-      "fields": {
-        "db":       { "type": "ref:Db", "required": true },
-        "debug":    { "type": "bool", "required": false, "default": false },
-        "retries":  { "type": "int",  "required": false, "default": 3, "min": 0, "max": 10 }
-      }
-    },
-    "Db": {
-      "kind": "struct",
-      "fields": {
-        "host":     { "type": "str", "required": true },
-        "port":     { "type": "int", "required": false, "default": 5432 },
-        "password": { "type": "secret:str", "required": false }
-      }
+  "root": {
+    "type": "struct",
+    "required": true,
+    "fields": {
+      "db": {
+        "type": "struct",
+        "required": true,
+        "fields": {
+          "host": { "type": "str", "required": true },
+          "port": { "type": "int", "required": false }
+        }
+      },
+      "note": { "type": "optional", "required": false, "inner": { "type": "str" } },
+      "tags": { "type": "list", "required": false, "items": { "type": "str" } },
+      "mode": { "type": "str", "required": false, "converter": "enum" }
     }
   }
 }
 ```
+
+Tipos soportados en v1: `str`, `int`, `float`, `bool`, `any`, `struct`, `optional`,
+`list`. El campo `converter` indica a la capa de Python qué conversión rica aplicar
+después (`enum`, `path`, `decimal`, `uuid`): el motor no conoce esos tipos.
 
 Reglas de evolución:
 
@@ -633,7 +634,7 @@ en ese momento.
 |---|---|---|
 | **F0** ✅ | Workspace, `AGENTS.md` + `docs/spec.md` + `just gate`, spikes de parsers con spans, esqueleto de errores | Spans correctos y `just gate` en verde |
 | **F1** ✅ | `keydex-core` (sources, merge, interp, snapshot) + `keydex-py` dict-mode | Carga YAML+env, `${}`, `explain`, benchmark vs OmegaConf |
-| **F2** | Esquema tipado: dataclasses, coerción, validación agregada, `.pyi` | `load(App)` completo con errores con path |
+| **F2** ✅ | Esquema tipado: dataclasses, coerción, validación agregada | `load(App)` completo con errores con path. `.pyi` generado no hace falta: los dataclasses ya dan tipos a mypy y al IDE |
 | **F3** | Perfiles, includes, secretos, `refresh()`, CLI | Suite dorada verde; secretos sin fuga |
 | **F4** | Publicación: wheels abi3 + 314t, crates.io, docs | Instalable desde PyPI en 3.11–3.14t |
 | **F5 (v2)** | `watch()`, fuentes remotas async, plugin de composición tipo Hydra | Solo con demanda real |

@@ -25,6 +25,8 @@ mod error;
 mod interp;
 mod loader;
 mod parse;
+#[cfg(feature = "schema")]
+mod schema;
 mod snapshot;
 mod source;
 mod value;
@@ -32,6 +34,8 @@ mod value;
 pub use error::{Error, Result};
 pub use loader::Builder;
 pub use parse::{Format, LineIndex};
+#[cfg(feature = "schema")]
+pub use schema::{Field, IR_VERSION, Schema, ValidationError, coerce};
 pub use snapshot::{Explanation, Snapshot};
 pub use source::{RawEntry, RawSource, SourceId, Tier};
 pub use value::{Provenance, Span, Value};
