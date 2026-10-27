@@ -528,11 +528,14 @@ keydex/
 
 ### 17.3 Dependencias clave
 
-- **YAML con spans:** `serde_yaml` está archivado y no conserva spans →
-  `saphyr`/`marked_yaml` (o `yaml-rust2`). Decisión a validar en F0 con un spike.
-- **TOML con spans:** `toml_edit`.
-- **JSON con posiciones:** `jiter` (rápido y con offsets) o `serde_json` + índices
-  propios si `jiter` no expone lo necesario.
+- **YAML con spans:** `saphyr` 0.3 (trae `marked_yaml` dentro). Confirmado en el
+  [spike 0001](spikes/0001-parsers-spans.md).
+- **TOML con spans:** `toml_edit` 0.25, usando `Document` (no `DocumentMut`, que
+  descarta los spans).
+- **JSON con posiciones:** `jsonc-parser` 0.34. `jiter` se descartó: es más rápido pero
+  no expone posiciones.
+- **`LineIndex` por fichero** para convertir offsets en línea/columna; sin él la
+  conversión es O(n) por clave y el parseo se vuelve cuadrático.
 - `compact_str` / `arcstr` para claves cortas; interner propio.
 - `thiserror`, `serde`, `rayon` (multi-fichero), `zeroize`/`secrecy`.
 - `pyo3` **solo** en `keydex-py`.
@@ -628,7 +631,7 @@ en ese momento.
 
 | Fase | Entregable | Criterio de salida |
 |---|---|---|
-| **F0** | Workspace, `AGENTS.md` + `docs/spec.md` + `just gate`, spikes de parsers con spans, esqueleto de errores | Spans correctos y `just gate` en verde |
+| **F0** ✅ | Workspace, `AGENTS.md` + `docs/spec.md` + `just gate`, spikes de parsers con spans, esqueleto de errores | Spans correctos y `just gate` en verde |
 | **F1** | `keydex-core` (sources, merge, interp, snapshot) + `keydex-py` dict-mode | Carga YAML+env, `${}`, `explain`, benchmark vs OmegaConf |
 | **F2** | Esquema tipado: dataclasses, coerción, validación agregada, `.pyi` | `load(App)` completo con errores con path |
 | **F3** | Perfiles, includes, secretos, `refresh()`, CLI | Suite dorada verde; secretos sin fuga |
@@ -655,7 +658,7 @@ Dogfooding desde F1: `cleanyourtv`, `f95downloader`, `pirate-scanner`.
 | Riesgo | Mitigación |
 |---|---|
 | Deriva Python↔Rust del Schema IR | IR versionado + tests cruzados con fixtures compartidos |
-| Parsers sin spans suficientes | Spike en F0; fallback: spans solo en YAML/TOML y `null` en JSON |
+| Parsers sin spans suficientes | **Resuelto en F0**: los tres formatos dan spans ([spike 0001](spikes/0001-parsers-spans.md)) |
 | Binding ambiguo en modo diccionario | Regla estricta `__`, documentada y testeada |
 | `abi3` vs free-threading divergen | Dos perfiles de build; CI dedicado a `t` |
 | Scope creep hacia framework | Lista de no-objetivos en el README y revisión por fase |

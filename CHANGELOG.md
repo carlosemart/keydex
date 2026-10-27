@@ -12,6 +12,8 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
   `SCHEMA_IR_VERSION`.
 - Gates de arquitectura (`scripts/gate.sh`) y `clippy.toml` con los métodos
   prohibidos en el core.
+- Spike de parsers con spans y [ADR 0006](docs/adr/0006-parsers-con-spans.md):
+  `saphyr` (YAML), `toml_edit` (TOML) y `jsonc-parser` (JSON). Cierra F0.
 
 ## [0.0.1] - 2026-10-27
 

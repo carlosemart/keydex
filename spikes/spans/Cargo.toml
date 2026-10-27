@@ -1,0 +1,13 @@
+[package]
+name = "spike-spans"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Crate independiente: no forma parte del workspace de keydex.
+[workspace]
+
+[dependencies]
+saphyr = "0.3.3"
+toml_edit = "0.25.17"
+jsonc-parser = "0.34.0"
