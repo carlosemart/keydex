@@ -2,8 +2,46 @@
 
 Acceso a configuración para Python: **tipado, explicable y rápido**, con el motor en Rust.
 
-> Estado: pre-alpha. `keydex 0.0.1` (PyPI) y `keydex-core 0.0.1` (crates.io) solo
-> reservan los nombres: todavía no hay nada funcional.
+> Estado: F1. Motor completo y binding en **modo diccionario** (`keydex.load` +
+> `explain`). Los modelos tipados llegan en F2. En PyPI solo hay un placeholder de
+> reserva: por ahora se instala desde el repo.
+
+## Instalación (desde el repo)
+
+Requiere Rust estable y [uv](https://docs.astral.sh/uv/).
+
+```bash
+uv venv
+uv pip install -e .
+```
+
+## Uso
+
+```python
+import keydex
+
+cfg = keydex.load(["config/app.yaml"], env_prefix="APP_")
+
+cfg["db.host"]              # valor ya resuelto y con el tipo correcto
+cfg.get("db.port", 5432)    # con default
+cfg.explain("db.host")      # quién lo definió, quién lo sombreó y qué usó
+cfg.keys()
+```
+
+El `explain` devuelve una estructura, no un texto:
+
+```python
+{
+  "key": "db.host",
+  "value": "env.internal",
+  "winner": {"source": "env", "tier": 2, "file": None, "line": None, "col": None},
+  "shadowed": [
+    {"source": "file:config/app.yaml", "tier": 4,
+     "file": "config/app.yaml", "line": 2, "col": 8}
+  ],
+  "refs": [],
+}
+```
 
 ## La idea
 

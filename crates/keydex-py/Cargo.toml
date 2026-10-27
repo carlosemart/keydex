@@ -1,0 +1,19 @@
+[package]
+name = "keydex-py"
+description = "Binding de Python (PyO3) para keydex. No se publica en crates.io."
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[lib]
+name = "_keydex"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+keydex-core = { path = "../keydex-core", version = "0.0.1" }
+pyo3 = { version = "0.30", features = ["extension-module", "abi3-py311"] }
