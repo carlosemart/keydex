@@ -1,0 +1,16 @@
+[package]
+name = "keydex-core"
+description = "Motor de configuración de keydex: fuentes, precedencia, interpolación y procedencia."
+readme = "README.md"
+keywords = ["configuration", "config", "settings", "environment"]
+categories = ["config"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true

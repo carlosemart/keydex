@@ -1,0 +1,11 @@
+# Regla 2 de AGENTS.md: keydex-core no lee entorno, reloj ni sistema de ficheros.
+# Se aplica con `deny(clippy::disallowed_methods)` en crates/keydex-core/src/lib.rs.
+disallowed-methods = [
+  { path = "std::env::var", reason = "el core no lee el entorno: inyecta EnvSource" },
+  { path = "std::env::var_os", reason = "el core no lee el entorno: inyecta EnvSource" },
+  { path = "std::env::vars", reason = "el core no lee el entorno: inyecta EnvSource" },
+  { path = "std::env::vars_os", reason = "el core no lee el entorno: inyecta EnvSource" },
+  { path = "std::time::SystemTime::now", reason = "el core no lee el reloj: inyecta Clock" },
+  { path = "std::fs::read", reason = "el core no lee el FS: inyecta FileProvider" },
+  { path = "std::fs::read_to_string", reason = "el core no lee el FS: inyecta FileProvider" },
+]
