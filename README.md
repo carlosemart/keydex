@@ -174,12 +174,12 @@ cargo run -p keydex-core --example schema
 ## Development
 
 ```bash
-./scripts/check.sh     # fmt + clippy
-cargo test --workspace --exclude keydex-py
-./scripts/gate.sh      # architecture invariants
+mise run ci        # fmt, clippy, Rust tests, gate, Python tests
+mise run docs      # build the docs site and the Rust API
 ```
 
-`scripts/gate.sh` warns and skips `cargo deny` when it is not installed. For CI parity:
+Tasks live in `mise.toml` and delegate to `scripts/`, which run without any task runner.
+`scripts/gate.sh` warns and skips `cargo deny` when it is not installed; for CI parity:
 `cargo install cargo-deny --locked`.
 
 ## License

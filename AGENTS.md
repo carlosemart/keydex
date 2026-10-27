@@ -43,18 +43,21 @@ docs/adr/           irreversible decisions
 ## Commands
 
 ```
-./scripts/check.sh     # fmt + clippy -D warnings
-cargo test --workspace --exclude keydex-py
-./scripts/gate.sh      # architecture invariants (hard rules 1 and 2)
+mise run check   # fmt + clippy -D warnings
+mise run test    # cargo test for keydex-core
+mise run gate    # architecture invariants (hard rules 1 and 2)
+mise run ci      # everything a pull request needs
 ```
 
 Documentation:
 
 ```
-./scripts/docs.sh       # build site/ (mkdocs) and target/doc/ (rustdoc)
-./scripts/docs.sh serve # live preview on http://127.0.0.1:8000
-mkdocs build --strict   # needs mkdocs-material, mkdocstrings[python] and ruff
+mise run docs        # build site/ (mkdocs) and target/doc/ (rustdoc)
+mise run docs:serve  # live preview on http://127.0.0.1:8000
 ```
+
+Tasks are defined in `mise.toml` and delegate to `scripts/`, which stay runnable without
+any task runner.
 
 ## Docs rules
 
@@ -75,9 +78,8 @@ mkdocs build --strict   # needs mkdocs-material, mkdocstrings[python] and ruff
 ## Done when
 
 - [ ] there is a test that fails without the change
-- [ ] `./scripts/check.sh` and `./scripts/gate.sh` are green, and
-      `cargo test --workspace --exclude keydex-py` passes
-- [ ] `mkdocs build --strict` passes if docstrings or `docs/` changed
+- [ ] `mise run check` and `mise run gate` are green, and `mise run test` passes
+- [ ] `mise run docs` passes if docstrings or `docs/` changed
 - [ ] no performance regression once a benchmark exists
 - [ ] `docs/spec.md` updated if behaviour changed
 - [ ] entry in `CHANGELOG.md`

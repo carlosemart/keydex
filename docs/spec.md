@@ -775,7 +775,7 @@ keydex/
 ├── rust-toolchain.toml
 ├── clippy.toml               # disallowed-methods (hard rule 2)
 ├── deny.toml                 # bans: serde_yaml
-├── justfile
+├── mise.toml                 # development tasks
 └── .gitignore / .gitattributes
 ```
 

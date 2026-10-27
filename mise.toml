@@ -1,0 +1,40 @@
+# Development tasks. Tools (rust, python, uv) come from your global mise config;
+# the Rust toolchain is pinned by rust-toolchain.toml.
+#
+#   mise run <task>          list them with `mise tasks`
+
+[tasks.check]
+description = "Format and lints (fmt + clippy, excludes keydex-py)"
+run = "./scripts/check.sh"
+
+[tasks.test]
+description = "Rust tests for keydex-core"
+run = "cargo test --workspace --exclude keydex-py"
+
+[tasks.gate]
+description = "Architecture invariants (no pyo3 in core, banned dependencies)"
+run = "./scripts/gate.sh"
+
+[tasks."python:install"]
+description = "Create .venv and install keydex in editable mode"
+run = "uv venv && uv pip install -e ."
+
+[tasks."python:test"]
+description = "Python test suite (API + homelab demo)"
+run = ".venv/bin/python -m pytest python/tests examples/homelab-demo/tests -q"
+
+[tasks.docs]
+description = "Build the docs site and the Rust API"
+run = "./scripts/docs.sh"
+
+[tasks."docs:serve"]
+description = "Live preview of the docs on http://127.0.0.1:8000"
+run = "./scripts/docs.sh serve"
+
+[tasks.fmt]
+description = "Apply rustfmt"
+run = "cargo fmt --all"
+
+[tasks.ci]
+description = "Everything CI runs for a pull request"
+depends = ["check", "test", "gate", "python:test"]
