@@ -4,7 +4,7 @@
 //! `eval`. Supports `${key}`, `${key:-default}`, `${env:VAR}` and nesting inside default
 //! values. Resolution is memoised and cycles are detected with a full trace.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{Error, Result};
 use crate::source::{Segment, render_path};
@@ -277,7 +277,109 @@ pub(crate) fn resolve_tree(root: &mut Node, env: &BTreeMap<String, String>) -> R
 
     let (values, refs) = resolve_all(&raw, env)?;
     apply_leaves(root, &mut Vec::new(), &values, &refs);
+    propagate_sensitivity(root);
     Ok(())
+}
+
+/// A value built from a sensitive reference is sensitive too.
+fn propagate_sensitivity(root: &mut Node) {
+    let mut sensitive = BTreeSet::new();
+    collect_sensitive(root, &mut Vec::new(), &mut sensitive);
+    if sensitive.is_empty() {
+        return;
+    }
+
+    let mut refs: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    collect_refs(root, &mut Vec::new(), &mut refs);
+
+    loop {
+        let mut changed = false;
+        for (path, targets) in &refs {
+            if sensitive.contains(path) {
+                continue;
+            }
+            if targets.iter().any(|target| sensitive.contains(target)) {
+                sensitive.insert(path.clone());
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    apply_sensitivity(root, &mut Vec::new(), &sensitive);
+}
+
+fn collect_sensitive(node: &Node, segments: &mut Vec<Segment>, out: &mut BTreeSet<String>) {
+    if node.sensitive {
+        out.insert(render_path(segments));
+    }
+    match &node.value {
+        Value::Map(entries) => {
+            for (key, child) in entries {
+                segments.push(Segment::Key(key.clone()));
+                collect_sensitive(child, segments, out);
+                segments.pop();
+            }
+        }
+        Value::Seq(items) => {
+            for (index, child) in items.iter().enumerate() {
+                segments.push(Segment::Index(index));
+                collect_sensitive(child, segments, out);
+                segments.pop();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_refs(node: &Node, segments: &mut Vec<Segment>, out: &mut BTreeMap<String, Vec<String>>) {
+    match &node.value {
+        Value::Map(entries) => {
+            for (key, child) in entries {
+                segments.push(Segment::Key(key.clone()));
+                collect_refs(child, segments, out);
+                segments.pop();
+            }
+        }
+        Value::Seq(items) => {
+            for (index, child) in items.iter().enumerate() {
+                segments.push(Segment::Index(index));
+                collect_refs(child, segments, out);
+                segments.pop();
+            }
+        }
+        _ => {
+            if !node.refs.is_empty() {
+                out.insert(render_path(segments), node.refs.clone());
+            }
+        }
+    }
+}
+
+fn apply_sensitivity(node: &mut Node, segments: &mut Vec<Segment>, sensitive: &BTreeSet<String>) {
+    match &mut node.value {
+        Value::Map(entries) => {
+            for (key, child) in entries.iter_mut() {
+                segments.push(Segment::Key(key.clone()));
+                apply_sensitivity(child, segments, sensitive);
+                segments.pop();
+            }
+        }
+        Value::Seq(items) => {
+            for (index, child) in items.iter_mut().enumerate() {
+                segments.push(Segment::Index(index));
+                apply_sensitivity(child, segments, sensitive);
+                segments.pop();
+            }
+        }
+        _ => {
+            if sensitive.contains(&render_path(segments)) {
+                node.sensitive = true;
+            }
+        }
+    }
 }
 
 fn collect_leaves(node: &Node, segments: &mut Vec<Segment>, out: &mut BTreeMap<String, Value>) {

@@ -269,3 +269,60 @@ fn nested_lists_keep_their_structure() {
     assert_eq!(cfg.get("m[0][1]"), Some(&Value::Int(2)));
     assert_eq!(cfg.get("m[1][0]"), Some(&Value::Int(3)));
 }
+
+#[test]
+fn a_sensitive_key_marks_its_own_subtree() {
+    let mut builder = Builder::new();
+    builder
+        .document(
+            "x.yaml",
+            "db:\n  host: h\n  password: s3cr3t\n",
+            Format::Yaml,
+            Tier::BaseFile,
+        )
+        .unwrap();
+    builder.mark_sensitive("db");
+    let cfg = builder.build().unwrap();
+
+    assert!(cfg.is_sensitive("db.password"));
+    assert!(cfg.is_sensitive("db.host"));
+    assert!(!cfg.is_sensitive("other"));
+}
+
+#[test]
+fn interpolation_propagates_sensitivity() {
+    let mut builder = Builder::new();
+    builder
+        .document(
+            "x.yaml",
+            "password: s3cr3t\ndsn: \"postgres://user:${password}@host/db\"\n",
+            Format::Yaml,
+            Tier::BaseFile,
+        )
+        .unwrap();
+    builder.mark_sensitive("password");
+    let cfg = builder.build().unwrap();
+
+    assert!(cfg.is_sensitive("password"));
+    assert!(
+        cfg.is_sensitive("dsn"),
+        "a value built from a secret is a secret"
+    );
+}
+
+#[test]
+fn a_non_sensitive_value_stays_visible() {
+    let mut builder = Builder::new();
+    builder
+        .document(
+            "x.yaml",
+            "host: h\npassword: s\n",
+            Format::Yaml,
+            Tier::BaseFile,
+        )
+        .unwrap();
+    builder.mark_sensitive("password");
+    let cfg = builder.build().unwrap();
+
+    assert!(!cfg.is_sensitive("host"));
+}

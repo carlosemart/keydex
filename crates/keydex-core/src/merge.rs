@@ -16,7 +16,8 @@ pub fn merge(low: Node, high: Node) -> Node {
         span: low_span,
         provenance: low_provenance,
         shadowed: mut low_shadowed,
-        ..
+        sensitive: low_sensitive,
+        refs: _low_refs,
     } = low;
     let Node {
         value: high_value,
@@ -24,6 +25,7 @@ pub fn merge(low: Node, high: Node) -> Node {
         provenance: high_provenance,
         shadowed: high_shadowed,
         refs: high_refs,
+        sensitive: high_sensitive,
     } = high;
 
     match (low_value, high_value) {
@@ -44,6 +46,7 @@ pub fn merge(low: Node, high: Node) -> Node {
                     low_shadowed
                 },
                 refs: high_refs,
+                sensitive: low_sensitive || high_sensitive,
             }
         }
         (_, value) => {
@@ -58,6 +61,7 @@ pub fn merge(low: Node, high: Node) -> Node {
                 provenance: high_provenance,
                 shadowed,
                 refs: high_refs,
+                sensitive: low_sensitive || high_sensitive,
             }
         }
     }
@@ -72,6 +76,7 @@ pub fn insert(node: Node, segments: &[Segment], value: Value, provenance: Proven
         provenance: existing,
         shadowed,
         refs,
+        sensitive,
     } = node;
 
     let Some((head, rest)) = segments.split_first() else {
@@ -81,6 +86,7 @@ pub fn insert(node: Node, segments: &[Segment], value: Value, provenance: Proven
             provenance: Some(provenance),
             shadowed,
             refs,
+            sensitive,
         };
     };
 
@@ -98,6 +104,7 @@ pub fn insert(node: Node, segments: &[Segment], value: Value, provenance: Proven
                 provenance: existing,
                 shadowed,
                 refs,
+                sensitive,
             }
         }
         Segment::Index(index) => {
@@ -116,6 +123,7 @@ pub fn insert(node: Node, segments: &[Segment], value: Value, provenance: Proven
                 provenance: existing,
                 shadowed,
                 refs,
+                sensitive,
             }
         }
     }

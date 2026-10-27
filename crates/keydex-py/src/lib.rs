@@ -34,13 +34,13 @@ struct Spec {
     profiles: Vec<String>,
     env_prefix: String,
     env: BTreeMap<String, String>,
+    sensitive: Vec<String>,
 }
 
 /// Resolved configuration, immutable and queryable by key.
 #[pyclass(name = "Settings", module = "keydex", frozen)]
 struct PySettings {
     spec: Spec,
-    sensitive: Vec<String>,
     inner: Arc<RwLock<Arc<Snapshot>>>,
 }
 
@@ -50,11 +50,6 @@ impl PySettings {
             .read()
             .map(|guard| Arc::clone(&guard))
             .map_err(|_| KeydexError::new_err("internal state poisoned"))
-    }
-
-    /// `true` when the key must be hidden from diagnostic output.
-    fn redacts(&self, key: &str) -> bool {
-        self.sensitive.iter().any(|candidate| candidate == key)
     }
 }
 
@@ -98,7 +93,7 @@ impl PySettings {
         snapshot
             .iter()
             .map(|(key, value)| {
-                let item = if self.redacts(key) {
+                let item = if snapshot.is_sensitive(key) {
                     py.None()
                 } else {
                     to_py(py, value)?
@@ -113,8 +108,11 @@ impl PySettings {
     /// Sensitive keys report `value: None` and `redacted: true` unless `reveal` is set.
     #[pyo3(signature = (key, reveal = false))]
     fn explain(&self, py: Python<'_>, key: &str, reveal: bool) -> PyResult<Py<PyAny>> {
-        match self.snapshot()?.explain(key) {
-            Some(explanation) => explanation_to_py(py, &explanation, self.redacts(key) && !reveal),
+        let snapshot = self.snapshot()?;
+        match snapshot.explain(key) {
+            Some(explanation) => {
+                explanation_to_py(py, &explanation, snapshot.is_sensitive(key) && !reveal)
+            }
             None => Ok(py.None()),
         }
     }
@@ -158,11 +156,11 @@ fn load(
             Some(map) => map.into_iter().collect(),
             None => std::env::vars().collect(),
         },
+        sensitive,
     };
     let snapshot = build_snapshot(&spec)?;
     Ok(PySettings {
         spec,
-        sensitive,
         inner: Arc::new(RwLock::new(Arc::new(snapshot))),
     })
 }
@@ -191,6 +189,7 @@ fn load_typed(
             Some(map) => map.into_iter().collect(),
             None => std::env::vars().collect(),
         },
+        sensitive: Vec::new(),
     };
 
     let mut builder = Builder::new().with_env(spec.env.clone());
@@ -245,6 +244,9 @@ fn build_snapshot(spec: &Spec) -> PyResult<Snapshot> {
     let mut builder = Builder::new().with_env(spec.env.clone());
     builder.env_source(&spec.env_prefix, Tier::Environment);
     add_documents(&mut builder, spec)?;
+    for key in &spec.sensitive {
+        builder.mark_sensitive(key);
+    }
     builder.build().map_err(to_py_err)
 }
 

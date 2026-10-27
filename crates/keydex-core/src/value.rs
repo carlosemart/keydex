@@ -131,6 +131,8 @@ pub struct Node {
     pub shadowed: Vec<Provenance>,
     /// Keys referenced through interpolation.
     pub refs: Vec<String>,
+    /// `true` when the value must be hidden from diagnostic output.
+    pub sensitive: bool,
 }
 
 impl Default for Node {
@@ -149,6 +151,7 @@ impl Node {
             provenance: None,
             shadowed: Vec::new(),
             refs: Vec::new(),
+            sensitive: false,
         }
     }
 

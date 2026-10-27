@@ -38,6 +38,9 @@ First functional release. `0.0.1` was only a name reservation.
   `tags: [a, b]` plus a profile `tags: [c]` now yields `[c]`, and `tags: []` clears it.
   The value model is a tree (`Value::Seq`/`Value::Map`), so a scalar can also replace a
   whole subtree. Literal keys containing dots no longer collide with nested paths.
+- Sensitivity is a property of the node: it survives the merge, propagates through
+  interpolation (a value built from a secret is redacted too), and drives redaction in
+  `explain`, `items`, `dump` and the CLI.
 
 ### Known limitations
 

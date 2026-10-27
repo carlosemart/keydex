@@ -75,6 +75,12 @@ impl Snapshot {
             .filter_map(|key| self.get(key).map(|value| (key.as_str(), value)))
     }
 
+    /// `true` when the value must be hidden from diagnostic output.
+    #[must_use]
+    pub fn is_sensitive(&self, key: &str) -> bool {
+        self.node(key).is_some_and(|node| node.sensitive)
+    }
+
     /// Provenance of a key: who won, who was shadowed and which references it used.
     #[must_use]
     pub fn explain(&self, key: &str) -> Option<Explanation> {

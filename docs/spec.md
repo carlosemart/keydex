@@ -436,14 +436,23 @@ Rules:
 
 ## 14. Secrets
 
-- `Secret[T]`: `repr`, `str`, `format`, logs and traces → `Secret('***')`. The real value
-  only through `.reveal()`.
-- `*_FILE` indirection for Docker/K8s secrets.
-- Typed models accept `Secret[str]`; the IR marks it with `converter: "secret"`.
-- Non-leak guarantees verified by tests: `repr`, the demo output, and the dataclass.
+Sensitivity is a **property of the node**, not a wrapper applied at the end:
 
-**Planned:** `zeroize` for buffers holding secrets in Rust, redaction in `dump`/`explain`,
-and remote secret sources (keyring, Vault, 1Password, Bitwarden, SOPS).
+- `Node.sensitive` is set by the caller (`sensitive=[...]`, keys derived from `*_FILE`) and
+  travels with the value through the merge (a sensitive node stays sensitive when a
+  higher-priority source overrides it).
+- Interpolation propagates it: a value built from a secret (`dsn: "${password}@host"`) is
+  itself sensitive.
+- `explain`, `items`, `dump` and the CLI redact sensitive values (`value: None`,
+  `redacted: true`); `reveal=True` / `--reveal` is the only way to see them. `get()` and `[]`
+  return the raw value by design.
+- `Secret[T]` is the typed presentation of a sensitive node: `repr`, `str` and dataclass
+  printing show `Secret('***')`.
+- `*_FILE` is opt-in (`secret_files=True`) and confined to `secret_root`.
+
+**Planned:** `zeroize` for the Rust buffers, marking sensitivity from the IR (`Secret[T]`
+currently protects through the Python wrapper only, not through `explain`), and remote
+secret sources (keyring, Vault, 1Password, Bitwarden, SOPS).
 
 ---
 

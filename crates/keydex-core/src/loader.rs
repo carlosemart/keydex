@@ -11,7 +11,7 @@ use crate::error::Result;
 use crate::interp;
 use crate::merge::{insert, merge};
 use crate::parse::{self, Format};
-use crate::source::{Path, SourceId, Tier};
+use crate::source::{Path, Segment, SourceId, Tier};
 use crate::value::{Node, Provenance, Value};
 
 /// One source and the tree it produced.
@@ -26,6 +26,7 @@ struct SourceTree {
 pub struct Builder {
     sources: Vec<SourceTree>,
     env: BTreeMap<String, String>,
+    sensitive: Vec<Path>,
     next_order: u32,
 }
 
@@ -105,6 +106,15 @@ impl Builder {
         Ok(self)
     }
 
+    /// Marks a key and its subtree as sensitive.
+    ///
+    /// Sensitivity travels with the node: it survives the merge, propagates through
+    /// interpolation, and makes every diagnostic output redact it by default.
+    pub fn mark_sensitive(&mut self, key: &str) -> &mut Self {
+        self.sensitive.push(Path::parse(key));
+        self
+    }
+
     /// Adds a document already read into memory.
     pub fn document(
         &mut self,
@@ -134,7 +144,10 @@ impl Builder {
     /// Applies precedence, resolves interpolations and returns the snapshot.
     pub fn build(self) -> Result<Snapshot> {
         let Builder {
-            mut sources, env, ..
+            mut sources,
+            env,
+            sensitive,
+            ..
         } = self;
 
         // Lowest priority first: band descending, order ascending. The last one wins.
@@ -148,6 +161,12 @@ impl Builder {
         let mut root = Node::empty_map();
         for source in sources {
             root = merge(root, source.root);
+        }
+
+        for path in &sensitive {
+            if let Some(node) = node_at_mut(&mut root, path.segments()) {
+                mark_subtree(node);
+            }
         }
 
         interp::resolve_tree(&mut root, &env)?;
@@ -179,6 +198,40 @@ fn stamp(node: &mut Node, id: &SourceId) {
         Value::Seq(items) => {
             for child in items.iter_mut() {
                 stamp(child, id);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Navigates to a node, creating nothing.
+fn node_at_mut<'a>(node: &'a mut Node, segments: &[Segment]) -> Option<&'a mut Node> {
+    let Some((head, rest)) = segments.split_first() else {
+        return Some(node);
+    };
+    match (head, &mut node.value) {
+        (Segment::Key(key), Value::Map(entries)) => entries
+            .get_mut(key)
+            .and_then(|child| node_at_mut(child, rest)),
+        (Segment::Index(index), Value::Seq(items)) => items
+            .get_mut(*index)
+            .and_then(|child| node_at_mut(child, rest)),
+        _ => None,
+    }
+}
+
+/// Marks a node and everything under it as sensitive.
+fn mark_subtree(node: &mut Node) {
+    node.sensitive = true;
+    match &mut node.value {
+        Value::Map(entries) => {
+            for child in entries.values_mut() {
+                mark_subtree(child);
+            }
+        }
+        Value::Seq(items) => {
+            for child in items.iter_mut() {
+                mark_subtree(child);
             }
         }
         _ => {}
