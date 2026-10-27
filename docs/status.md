@@ -37,8 +37,9 @@ covered by tests; `❌` means designed but not built.
 | `Enum` (case-insensitive, validated in the engine) | ✅ |
 | `Path`, `Decimal` (text only), `UUID` | ✅ |
 | `Secret[T]` | ✅ |
+| `dict[str, T]` (free-form maps, also from `APP_MAP__KEY`) | ✅ |
 | `datetime`, `duration`, `size`, `rate`, `URL` | ❌ |
-| Discriminated unions, `Literal`, `tuple`, `set`, `dict[str, T]` | ❌ |
+| Discriminated unions, `Literal`, `tuple`, `set` | ❌ |
 | `pydantic`, `attrs`, `msgspec`, `TypedDict` | ❌ |
 
 ## Validation and errors

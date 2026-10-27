@@ -205,8 +205,8 @@ runtime. *Planned: explicit validation of the IR.*
 
 ### 7.1 Supported types
 
-**Implemented:** `str`, `int`, `float`, `bool`, `Optional[T]`, `list[T]`, nested
-dataclasses, `Enum`, `Path`, `Decimal`, `UUID`, `Secret[T]`.
+**Implemented:** `str`, `int`, `float`, `bool`, `Optional[T]`, `list[T]`, `dict[str, T]`,
+nested dataclasses, `Enum`, `Path`, `Decimal`, `UUID`, `Secret[T]`.
 
 **Planned:** `datetime`/`date`/`time`, `IPv4Address`/`IPv6Address`, `duration`, `size`,
 `rate`, `URL`, discriminated `Union`, `Literal`, `tuple`, `set`, `dict[str, T]`, `attrs`,
@@ -363,7 +363,7 @@ stable across releases.
 ```
 
 Types in v1: `str`, `int`, `float`, `bool`, `any`, `path`, `decimal`, `uuid`,
-`enum` (with `variants`), `secret` (with `inner`), `optional`, `list` and `struct`. The
+`enum` (with `variants`), `secret` (with `inner`), `optional`, `list`, `map` and `struct`. The
 engine validates every one of them and reports errors with the path and the document
 position; the calling layer only constructs its own types afterwards.
 

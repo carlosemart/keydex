@@ -32,6 +32,16 @@ First functional release. `0.0.1` was only a name reservation.
 - Load benchmark: 1.26 ms for 1004 keys, 21× faster than OmegaConf
   ([details](docs/benchmarks.md)).
 
+### Added
+
+- `dict[str, T]`: free-form maps, validated per value, bindable from the environment with
+  `APP_MAP__KEY`, and unknown-key detection treats their keys as known.
+
+### Changed
+
+- `settings[key]` and `dict(settings)` now redact sensitive values, like `items()` and
+  `dump`. `get()` remains the raw escape hatch.
+
 ### Fixed
 
 - Lists are replaced whole by a higher-priority source instead of merged by index: a base
@@ -68,6 +78,16 @@ First functional release. `0.0.1` was only a name reservation.
 - New [status](docs/status.md), [install](docs/install.md),
   [troubleshooting](docs/troubleshooting.md), [migration](docs/migration.md) and
   [contributing](docs/contributing.md) pages, so the guides stop duplicating the same facts.
+
+### Added
+
+- `dict[str, T]`: free-form maps, validated per value, bindable from the environment with
+  `APP_MAP__KEY`, and unknown-key detection treats their keys as known.
+
+### Changed
+
+- `settings[key]` and `dict(settings)` now redact sensitive values, like `items()` and
+  `dump`. `get()` remains the raw escape hatch.
 
 ### Fixed
 

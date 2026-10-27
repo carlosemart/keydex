@@ -55,6 +55,17 @@ def _node(tp: object, *, required: bool, has_default: bool = False) -> dict:
         item = args[0] if args else str
         return {"type": "list", "required": required, "items": _node(item, required=False)}
 
+    if origin is dict:
+        args = typing.get_args(tp)
+        key_type, value_type = args if len(args) == 2 else (str, str)
+        if key_type is not str:
+            raise TypeError("map keys must be str")
+        return {
+            "type": "map",
+            "required": required,
+            "values": _node(value_type, required=False),
+        }
+
     if dataclasses.is_dataclass(tp):
         hints = typing.get_type_hints(tp)
         fields = {}
@@ -150,6 +161,12 @@ def _convert(tp: object, value: object) -> object:
         args = typing.get_args(tp)
         item = args[0] if args else str
         return [_convert(item, element) for element in typing.cast("list[object]", value)]
+
+    if origin is dict:
+        args = typing.get_args(tp)
+        value_type = args[1] if len(args) == 2 else str
+        entries = typing.cast("dict", value).items()
+        return {key: _convert(value_type, item) for key, item in entries}
 
     if origin is Secret:
         return Secret(value)

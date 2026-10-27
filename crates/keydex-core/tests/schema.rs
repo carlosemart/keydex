@@ -375,3 +375,72 @@ fn a_structurally_invalid_ir_is_rejected_at_parse_time() {
     .unwrap_err();
     assert!(matches!(error, keydex_core::Error::InvalidSchema { .. }));
 }
+
+const MAP_IR: &str = r#"{
+  "ir": "keydex.schema/v1",
+  "root": {"type":"struct","required":true,"fields":{
+    "labels": {"type":"map","required":false,"values":{"type":"str","required":false}},
+    "limits": {"type":"map","required":false,"values":{"type":"int","required":false}}
+  }}
+}"#;
+
+#[test]
+fn a_map_accepts_free_form_keys() {
+    let tree = load_ir(
+        MAP_IR,
+        "labels:\n  env: prod\n  \"team.a\": core\nlimits:\n  cpu: 2\n",
+    )
+    .unwrap();
+
+    assert_eq!(tree["labels"]["env"], json!("prod"));
+    assert_eq!(tree["labels"]["team.a"], json!("core"));
+    assert_eq!(tree["limits"]["cpu"], json!(2));
+}
+
+#[test]
+fn a_map_binds_environment_keys_with_double_underscore() {
+    let schema = Schema::from_json(MAP_IR).unwrap();
+    let mut builder = Builder::new().with_env(env(&[("APP_LABELS__TEAM_A", "core")]));
+    builder
+        .schema_env_source(&schema, "APP_", Tier::Environment)
+        .unwrap();
+    builder
+        .document(
+            "app.yaml",
+            "labels:\n  env: prod\n",
+            Format::Yaml,
+            Tier::BaseFile,
+        )
+        .unwrap();
+    let snapshot = builder.build().unwrap();
+    let tree = coerce(&snapshot, &schema).unwrap();
+
+    assert_eq!(tree["labels"]["team_a"], json!("core"));
+    assert_eq!(tree["labels"]["env"], json!("prod"));
+}
+
+#[test]
+fn keys_inside_a_map_are_not_unknown() {
+    let schema = Schema::from_json(MAP_IR).unwrap();
+    let mut builder = Builder::new().with_env(env(&[]));
+    builder
+        .schema_env_source(&schema, "APP_", Tier::Environment)
+        .unwrap();
+    builder
+        .document(
+            "app.yaml",
+            "labels:\n  anything: goes\n",
+            Format::Yaml,
+            Tier::BaseFile,
+        )
+        .unwrap();
+    let snapshot = builder.build().unwrap();
+
+    assert!(keydex_core::unknown_keys(&snapshot, &schema).is_empty());
+}
+
+#[test]
+fn a_bad_map_value_is_a_validation_error() {
+    let errors = load_ir(MAP_IR, "limits:\n  cpu: many\n").unwrap_err();
+    assert_eq!(errors[0].path, "limits.cpu");
+}

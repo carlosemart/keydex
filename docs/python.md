@@ -38,8 +38,8 @@ cfg.debug          # bool
 
 - Field types come from the dataclass annotations; defaults live in the dataclass and only
   there.
-- Supported today: `str`, `int`, `float`, `bool`, `Optional[T]`, `list[T]`, nested
-  dataclasses, `Enum`, `Path`, `Decimal`, `UUID`, `Secret[str]`.
+- Supported today: `str`, `int`, `float`, `bool`, `Optional[T]`, `list[T]`, `dict[str, T]`,
+  nested dataclasses, `Enum`, `Path`, `Decimal`, `UUID`, `Secret[T]`.
 
 Known gaps in the type layer, so they do not surprise you:
 
@@ -174,7 +174,8 @@ cfg.db.password            # Secret('***')
 cfg.db.password.reveal()   # the real value
 ```
 
-`repr`, `str` and any log of the dataclass show `***`.
+`repr`, `str` and any log of the dataclass show `***`. The field is also marked sensitive in
+the snapshot, so `explain` redacts it and `dict(settings)` cannot leak it.
 
 Reading a secret from a file is **opt-in** and stays inside a directory you choose:
 

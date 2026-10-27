@@ -128,9 +128,19 @@ impl PySettings {
     }
 
     /// Same as `get`, but raises `KeyError` when the key does not exist.
+    ///
+    /// Sensitive keys return `None`, so `dict(settings)` cannot leak them. Use `get()` when
+    /// you need the raw value.
     fn __getitem__(&self, py: Python<'_>, key: &str) -> PyResult<Py<PyAny>> {
-        match self.snapshot().get(key) {
-            Some(value) => to_py(py, value),
+        let snapshot = self.snapshot();
+        match snapshot.get(key) {
+            Some(value) => {
+                if snapshot.is_sensitive(key) {
+                    Ok(py.None())
+                } else {
+                    to_py(py, value)
+                }
+            }
             None => Err(PyKeyError::new_err(key.to_string())),
         }
     }

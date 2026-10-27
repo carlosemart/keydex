@@ -298,3 +298,48 @@ def test_the_secret_file_variable_does_not_become_a_key(tmp_path: Path) -> None:
 
     assert "db.password" in settings
     assert "db.password_file" not in settings
+
+
+def test_a_free_form_map(tmp_path: Path) -> None:
+    @dataclass(frozen=True)
+    class WithMap:
+        labels: dict[str, str] = field(default_factory=dict)
+
+    path = write(tmp_path, "labels:\n  env: prod\n  team: core\n")
+    cfg = keydex.load(WithMap, files=[path], env_prefix="APP_", env={})
+    assert cfg.labels == {"env": "prod", "team": "core"}
+
+
+def test_map_values_are_coerced(tmp_path: Path) -> None:
+    @dataclass(frozen=True)
+    class WithLimits:
+        limits: dict[str, int] = field(default_factory=dict)
+
+    path = write(tmp_path, "limits:\n  cpu: 2\n  memory: 4\n")
+    cfg = keydex.load(WithLimits, files=[path], env_prefix="APP_", env={})
+    assert cfg.limits == {"cpu": 2, "memory": 4}
+
+
+def test_a_bad_map_value_is_a_validation_error(tmp_path: Path) -> None:
+    @dataclass(frozen=True)
+    class WithLimits:
+        limits: dict[str, int] = field(default_factory=dict)
+
+    path = write(tmp_path, "limits:\n  cpu: many\n")
+    with pytest.raises(keydex.ValidationError) as info:
+        keydex.load(WithLimits, files=[path], env_prefix="APP_", env={})
+    assert info.value.errors[0]["path"] == "limits.cpu"
+
+
+def test_indexing_and_dict_are_redacted_but_get_is_raw(tmp_path: Path) -> None:
+    settings = keydex.load_settings(
+        files=[write(tmp_path, "db:\n  user: u\n  password: s3cr3t\n")],
+        env_prefix="APP_",
+        env={},
+        sensitive=["db.password"],
+    )
+
+    assert settings["db.password"] is None
+    assert dict(settings)["db.password"] is None
+    assert dict(settings.items())["db.password"] is None
+    assert settings.get("db.password") == "s3cr3t"

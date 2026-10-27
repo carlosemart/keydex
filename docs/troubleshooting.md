@@ -49,10 +49,11 @@ The key is marked sensitive, either because you listed it in `sensitive=[...]`, 
 came from a `*_FILE` variable, or because it was built from a sensitive value through
 interpolation. Use `reveal=True` (`--reveal` in the CLI) when you really need it.
 
-## `get()` returns the secret but the dump does not
+## `get()` returns the secret but everything else does not
 
-That is the contract: `get()`/`[]` are the raw escape hatch; `explain`, `items` and `dump`
-are the diagnostic surface and redact. Do not log the result of `get()`.
+That is the contract: `get()` is the raw escape hatch; `explain`, `items`, `dump`, `[]` and
+`dict(settings)` are the read surface and redact sensitive keys. Do not log the result of
+`get()`.
 
 ## A list kept the old values
 

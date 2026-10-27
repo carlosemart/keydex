@@ -66,6 +66,7 @@ fn walk(field: &Field, path: &str) -> Result<()> {
             }
         }
         FieldType::List { items } => walk(items, &format!("{path}[]"))?,
+        FieldType::Map { values } => walk(values, &format!("{path}.*"))?,
         FieldType::Optional { inner } | FieldType::Secret { inner } => {
             walk(inner, &format!("{path}?"))?;
         }
@@ -132,6 +133,11 @@ pub enum FieldType {
     List {
         /// Element type.
         items: Box<Field>,
+    },
+    /// Free-form string-keyed map.
+    Map {
+        /// Value type.
+        values: Box<Field>,
     },
     /// Object, merged key by key.
     Struct {
@@ -276,6 +282,7 @@ fn collect_leaf_paths(node: &Field, path: &str, out: &mut Vec<String>) {
             }
         }
         FieldType::List { items } => collect_leaf_paths(items, path, out),
+        FieldType::Map { values } => collect_leaf_paths(values, path, out),
         FieldType::Optional { inner } | FieldType::Secret { inner } => {
             collect_leaf_paths(inner, path, out);
         }
@@ -411,6 +418,38 @@ fn node(
             _ => node(inner, current, path, errors),
         },
         FieldType::Secret { inner } => node(inner, current, path, errors),
+        FieldType::Map { values } => match current.map(|node| &node.value) {
+            Some(Value::Map(entries)) => {
+                let mut object = Map::new();
+                for (key, child) in entries {
+                    let child_path = path.clone().with_key(key.as_str());
+                    if let Some(value) =
+                        node(values, Some(child), &child_path, errors).into_option()
+                    {
+                        object.insert(key.clone(), value);
+                    }
+                }
+                Slot::Value(Json::Object(object))
+            }
+            Some(other) => {
+                errors.push(error(
+                    path,
+                    current,
+                    format!("expected an object, got {}", kind_of(other)),
+                ));
+                Slot::Missing
+            }
+            None => {
+                if field.required {
+                    errors.push(ValidationError {
+                        path: path.to_string(),
+                        message: String::from("required map missing"),
+                        span: None,
+                    });
+                }
+                Slot::Missing
+            }
+        },
         FieldType::List { items } => match current.map(|node| &node.value) {
             Some(Value::Seq(entries)) => {
                 let mut values = Vec::with_capacity(entries.len());
@@ -631,7 +670,8 @@ pub fn bind_env(
 ) -> Result<Vec<(String, String)>> {
     let mut dotted: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut relaxed: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    collect_paths(root, "", &mut dotted, &mut relaxed);
+    let mut dynamic: Vec<String> = Vec::new();
+    collect_paths(root, "", &mut dotted, &mut relaxed, &mut dynamic);
 
     let wanted = prefix.to_ascii_uppercase();
     let mut bindings = Vec::new();
@@ -652,6 +692,14 @@ pub fn bind_env(
             .or_else(|| relaxed.get(&relaxed_key));
 
         let Some(paths) = candidates else {
+            // A free-form map has no static paths: any key under its prefix binds to it.
+            let prefix = dynamic
+                .iter()
+                .filter(|prefix| dotted_key.starts_with(&format!("{prefix}.")))
+                .max_by_key(|prefix| prefix.len());
+            if let Some(_prefix) = prefix {
+                bindings.push((dotted_key.clone(), value.clone()));
+            }
             continue;
         };
         match paths.as_slice() {
@@ -674,6 +722,7 @@ fn collect_paths(
     path: &str,
     dotted: &mut BTreeMap<String, Vec<String>>,
     relaxed: &mut BTreeMap<String, Vec<String>>,
+    dynamic: &mut Vec<String>,
 ) {
     match &node.kind {
         FieldType::Struct { fields } => {
@@ -683,13 +732,19 @@ fn collect_paths(
                 } else {
                     format!("{path}.{name}")
                 };
-                collect_paths(child, &child_path, dotted, relaxed);
+                collect_paths(child, &child_path, dotted, relaxed, dynamic);
             }
         }
         // Lists are not mapped from the environment in this version.
         FieldType::List { .. } => {}
+        FieldType::Map { .. } => {
+            // The keys inside a map are not known statically: only the prefix is.
+            if !path.is_empty() {
+                dynamic.push(path.to_string());
+            }
+        }
         FieldType::Optional { inner } | FieldType::Secret { inner } => {
-            collect_paths(inner, path, dotted, relaxed);
+            collect_paths(inner, path, dotted, relaxed, dynamic);
         }
         _ => {
             if !path.is_empty() {
