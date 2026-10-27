@@ -6,14 +6,19 @@ Acceso a configuración para Python: **tipado, explicable y rápido**, con el mo
 > (publicación de wheels) y las fuentes remotas. En PyPI solo hay un placeholder de
 > reserva: por ahora se instala desde el repo.
 
-## Instalación (desde el repo)
+## Instalación
 
-Requiere Rust estable y [uv](https://docs.astral.sh/uv/).
+Aún no hay release pública: en PyPI solo está el `0.0.1` de reserva. La `0.1.0` se
+publica empujando el tag `v0.1.0` (ver [publicación](docs/release.md)).
+
+Mientras tanto, desde el repo:
 
 ```bash
 uv venv
 uv pip install -e .
 ```
+
+Se publican wheels `abi3` para Python 3.11–3.15 y un wheel `cp314t` para free-threading.
 
 ## Uso
 

@@ -15,6 +15,7 @@ from keydex import _schema
 from keydex._keydex import (
     KeydexError,
     Settings,
+    __version__,
     load as _load_settings,
     load_typed as _load_typed,
 )
@@ -30,7 +31,6 @@ __all__ = [
     "load_settings",
     "__version__",
 ]
-__version__ = "0.0.1"
 
 T = TypeVar("T")
 

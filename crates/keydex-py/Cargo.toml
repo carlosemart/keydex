@@ -14,7 +14,13 @@ authors.workspace = true
 name = "_keydex"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Un wheel sirve para 3.11–3.15 con GIL. Para un build free-threaded, `abi3` no aplica:
+# se compila con `--no-default-features`.
+default = ["abi3"]
+abi3 = ["pyo3/abi3-py311"]
+
 [dependencies]
-keydex-core = { path = "../keydex-core", version = "0.0.1" }
-pyo3 = { version = "0.30", features = ["extension-module", "abi3-py311"] }
+keydex-core = { path = "../keydex-core", version = "0.1.0" }
+pyo3 = { version = "0.30", features = ["extension-module"] }
 serde_json = "1"

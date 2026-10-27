@@ -52,3 +52,20 @@ jobs:
       - run: maturin build --release --out dist
       - run: python -m pip install dist/*.whl
       - run: python -m pytest python/tests examples/homelab-demo/tests -q
+
+  python-freethreaded:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip maturin uv pytest
+      - run: uv python install 3.14t
+      - run: uv venv .venv-ft --python 3.14t
+      - run: maturin build --release --no-default-features --interpreter .venv-ft/bin/python --out dist-ft
+      - run: uv pip install --python .venv-ft/bin/python dist-ft/*.whl pytest
+      - name: El GIL debe seguir desactivado
+        run: .venv-ft/bin/python -c "import sys, keydex; assert not sys._is_gil_enabled(), 'el módulo fuerza el GIL'"
+      - run: .venv-ft/bin/python -m pytest python/tests examples/homelab-demo/tests -q

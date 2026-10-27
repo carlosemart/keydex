@@ -8,7 +8,8 @@
 //! `cargo test --workspace` (requiere libpython). Se compila con `cargo check -p
 //! keydex-py` y se enlaza desde maturin.
 //!
-//! TODO(F4): declarar `gil_used = false` cuando se publique el wheel `cp314t`.
+//! El módulo declara `gil_used = false`: no hay estado global mutable (el snapshot vive
+//! tras un `RwLock`) y todas las operaciones son seguras sin GIL.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -361,7 +362,7 @@ fn explanation_to_py(py: Python<'_>, explanation: &Explanation) -> PyResult<Py<P
     Ok(dict.into_any().unbind())
 }
 
-#[pymodule]
+#[pymodule(gil_used = false)]
 fn _keydex(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PySettings>()?;
     module.add_function(wrap_pyfunction!(load, module)?)?;
