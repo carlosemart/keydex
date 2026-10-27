@@ -121,7 +121,10 @@ class Environment:
             source,
             self._profiles,
             self._on_unknown,
-            self._sensitive + derived,
+            list(self._sensitive) + derived + _schema.sensitive_paths(model),
+            self._env is None,
+            self._secret_files,
+            str(self._secret_root) if self._secret_root is not None else None,
         )
         if errors:
             raise ValidationError(errors)
@@ -236,6 +239,9 @@ def load_settings(
         source,
         list(profiles),
         list(sensitive) + derived,
+        env is None,
+        secret_files,
+        str(secret_root) if secret_root is not None else None,
     )
 
 
@@ -289,6 +295,10 @@ def _environment(
             source[key[: -len("_FILE")]] = resolved.read_text(encoding="utf-8").strip()
         except OSError as error:
             raise KeydexError(f"{key}: cannot read {resolved}: {error}") from error
+
+        # The path itself is not configuration: keeping it would expose the location of
+        # the secret and show up as an unknown key.
+        del source[key]
 
         stem = key[: -len("_FILE")]
         suffix = stem[len(prefix) :] if prefix else stem

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use keydex_core::{Builder, Error, Format, Tier, Value};
+use keydex_core::{Builder, Error, Format, Path, Segment, Tier, Value};
 
 fn env(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
     pairs
@@ -325,4 +325,30 @@ fn a_non_sensitive_value_stays_visible() {
     let cfg = builder.build().unwrap();
 
     assert!(!cfg.is_sensitive("host"));
+}
+
+#[test]
+fn paths_round_trip_through_the_rendered_form() {
+    for key in ["plain", "a.b", "a\"b", "a\\b", "with[bracket]"] {
+        let path = Path::from_segments(vec![Segment::Key(key.to_string())]);
+        let rendered = path.to_string();
+        assert_eq!(Path::parse(&rendered), path, "rendered: {rendered}");
+    }
+}
+
+#[test]
+fn yaml_merge_keys_are_resolved() {
+    let mut builder = Builder::new();
+    builder
+        .document(
+            "x.yaml",
+            "base: &b\n  host: h\n  port: 1\nsvc:\n  <<: *b\n  port: 2\n",
+            Format::Yaml,
+            Tier::BaseFile,
+        )
+        .unwrap();
+    let cfg = builder.build().unwrap();
+
+    assert_eq!(cfg.get("svc.host"), Some(&Value::str("h")));
+    assert_eq!(cfg.get("svc.port"), Some(&Value::Int(2)));
 }

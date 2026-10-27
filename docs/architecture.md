@@ -169,8 +169,8 @@ receives contents.
 
 ## Known gaps
 
-- Decoding a typed model does not carry sensitivity from the IR: `Secret[T]` protects the
-  Python object, but `explain` in dictionary mode only knows what the caller declared.
+- Sensitivity of a typed model is derived from its `Secret[T]` fields when loading through
+  `Environment`; a bare `load()` returns a dataclass, so there is no `explain` to redact.
 - `Format` is not pluggable.
 - Profiles, file discovery and `*_FILE` live in the binding, so a pure Rust caller does not
   get them.

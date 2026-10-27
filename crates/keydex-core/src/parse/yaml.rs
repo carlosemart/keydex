@@ -29,6 +29,7 @@ fn to_node(node: &MarkedYaml<'_>, file: &str) -> Node {
             for (key, value) in mapping.iter() {
                 entries.insert(key_of(&key.data), to_node(value, file));
             }
+            resolve_merge_keys(&mut entries);
             Value::Map(entries)
         }
         YamlData::Sequence(sequence) => {
@@ -38,6 +39,30 @@ fn to_node(node: &MarkedYaml<'_>, file: &str) -> Node {
     };
 
     Node::new(value, span)
+}
+
+/// Resolves the YAML merge key (`<<: *anchor`): the merged map provides defaults and the
+/// explicit keys win.
+fn resolve_merge_keys(entries: &mut BTreeMap<String, Node>) {
+    let Some(merged) = entries.remove("<<") else {
+        return;
+    };
+    let sources = match merged.value {
+        Value::Map(map) => vec![map],
+        Value::Seq(items) => items
+            .into_iter()
+            .filter_map(|item| match item.value {
+                Value::Map(map) => Some(map),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    for source in sources {
+        for (key, value) in source {
+            entries.entry(key).or_insert(value);
+        }
+    }
 }
 
 fn key_of<'a>(data: &YamlData<'a, MarkedYaml<'a>>) -> String {

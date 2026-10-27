@@ -466,7 +466,7 @@ secret sources (keyring, Vault, 1Password, Bitwarden, SOPS).
   Configuration is never left half applied. **Implemented.**
 - A typed model is an immutable copy: to reload, call `load()` again.
 - Thread safety: shared immutable snapshot; the `Settings` handle holds it behind an
-  `RwLock` that is only taken on `refresh()`.
+  `ArcSwap`: reads take no lock and `refresh()` swaps the pointer.
 - `watch()` (v2): `notify` plus debounce, `on_change(keys)` callbacks.
 - Per-request overrides through `contextvar`. *Planned.*
 
@@ -731,7 +731,7 @@ There is also `crates/keydex-core/AGENTS.md`, loaded when working inside that su
 | core without pyo3 | `./scripts/gate.sh` (pattern `^pyo3( |$)`) plus `--self-test`, which proves the gate fires on a violation |
 | core without env/clock/FS | `clippy.toml` blocks **seven specific methods** (`std::env::{var,var_os,vars,vars_os}`, `SystemTime::now`, `std::fs::{read,read_to_string}`), not the whole namespaces; anything else is reviewed |
 | structured errors | `deny(panic, unwrap_used, expect_used)` in the core; `ValidationError` still carries a `String` message |
-| no global state | `forbid(static_mut_refs)` plus review; the only shared state is the `RwLock` in the binding |
+| no global state | `forbid(static_mut_refs)` plus review; the only shared state is the `ArcSwap` in the binding |
 | zero FFI per access | **not enforced yet**: no benchmark gate exists |
 | spans in `explain` | golden tests in `crates/keydex-core/tests/snapshot.rs` assert file, line and column |
 | banned dependencies | `gate.sh` and `cargo deny` in CI |

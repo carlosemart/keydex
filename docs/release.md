@@ -31,9 +31,9 @@ The tag triggers `.github/workflows/release.yml`:
 | `publish-pypi` | uploads the sdist and the wheels to PyPI |
 | `publish-crates` | publishes `keydex-core` |
 
-The free-threaded wheel (`cp314t`) is built and tested in CI but **not published yet**:
-every access takes an `RwLock`, which defeats the point of free-threading. It ships once
-the read path is lock-free.
+The free-threaded wheel (`cp314t`) is built and tested in CI (the GIL is asserted off) but
+**not published yet**: publishing is out of scope for now, not blocked by the read path —
+that became lock-free in ADR 0008.
 
 ## Why two builds
 

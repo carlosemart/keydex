@@ -211,6 +211,9 @@ cfg.get("db.password")                # raw value: get() is the escape hatch
 
 `dump` and the CLI use `items()`, so they inherit the redaction.
 
+A `Secret[T]` field is also marked sensitive in the snapshot, so `env.explain("db.password")`
+redacts it when you load through `Environment`.
+
 Sensitivity travels with the value: if a key references a secret
 (`dsn: "postgres://user:${password}@host/db"`), the derived key is redacted too. In typed
 models, `Secret[T]` is the presentation of a sensitive value.

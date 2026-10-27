@@ -69,6 +69,17 @@ First functional release. `0.0.1` was only a name reservation.
   [troubleshooting](docs/troubleshooting.md), [migration](docs/migration.md) and
   [contributing](docs/contributing.md) pages, so the guides stop duplicating the same facts.
 
+### Fixed
+
+- `Secret[T]` fields are marked sensitive in the snapshot, so `explain` redacts them instead
+  of printing the value.
+- `refresh()` re-reads the process environment and the `*_FILE` secrets instead of serving
+  the ones captured at load time.
+- The `*_FILE` variable no longer becomes a configuration key (it exposed the path and
+  produced an unknown-key warning).
+- `Path` render/parse round-trips keys containing quotes and backslashes.
+- YAML merge keys (`<<: *anchor`) are resolved, with explicit keys winning.
+
 ### Known limitations
 
 - `imports:` / `includes:` not implemented (see specification §9.3).

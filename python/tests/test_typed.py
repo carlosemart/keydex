@@ -11,6 +11,7 @@ from uuid import UUID
 import pytest
 
 import keydex
+from keydex import Secret
 
 
 @dataclass(frozen=True)
@@ -248,3 +249,52 @@ def test_validation_errors_carry_the_position(tmp_path: Path) -> None:
     assert error["path"] == "db.port"
     assert error["file"] == path
     assert error["line"] == 3
+
+
+def test_a_secret_field_is_redacted_in_explain(tmp_path: Path) -> None:
+    @dataclass(frozen=True)
+    class Credentials:
+        user: str
+        password: Secret[str]
+
+    path = write(tmp_path, "user: u\npassword: s3cr3t\n")
+    env = keydex.Environment(files=[path], env={})
+    cfg = env.load(Credentials)
+
+    assert cfg.password.reveal() == "s3cr3t"
+    assert env.explain("password")["value"] is None
+    assert env.explain("password")["redacted"] is True
+    assert env.explain("user")["value"] == "u"
+
+
+def test_refresh_rereads_the_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @dataclass(frozen=True)
+    class Port:
+        port: int = 1
+
+    path = write(tmp_path, "port: 1\n")
+    env = keydex.Environment(files=[path], env_prefix="APP_")
+    env.load(Port)
+
+    monkeypatch.setenv("APP_PORT", "99")
+    env.refresh()
+
+    # The snapshot keeps the raw environment string; coercion happens on load.
+    assert env.explain("port")["value"] == "99"
+    assert env.load(Port).port == 99
+
+
+def test_the_secret_file_variable_does_not_become_a_key(tmp_path: Path) -> None:
+    reference = tmp_path / "pw"
+    reference.write_text("s3cr3t", encoding="utf-8")
+
+    settings = keydex.load_settings(
+        files=[write(tmp_path, "db:\n  user: u\n")],
+        env_prefix="APP_",
+        env={"APP_DB__PASSWORD_FILE": str(reference)},
+        secret_files=True,
+        secret_root=str(tmp_path),
+    )
+
+    assert "db.password" in settings
+    assert "db.password_file" not in settings

@@ -14,7 +14,8 @@ free-threaded interpreters, and `abi3t` (PEP 803) is not available yet.
 - Python 3.11 minimum (gives `tomllib` in the standard library, no `tomli` dependency).
 - One `abi3-py311` wheel covers 3.11–3.15 with the GIL.
 - Separate `cp314t` wheels (and optionally `cp313t`) for free-threading.
-- `#[pymodule(gil_used = false)]` and global state behind `RwLock`.
+- `#[pymodule(gil_used = false)]` and global state synchronised (an `RwLock` at the time,
+  replaced by an `ArcSwap` in [0008](0008-arc-swap-lock-free-reads.md)).
 
 ## Consequences
 

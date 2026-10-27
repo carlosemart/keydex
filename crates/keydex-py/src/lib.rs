@@ -9,7 +9,7 @@
 //! keydex-py` and linked by maturin.
 //!
 //! The module declares `gil_used = false`: there is no mutable global state (the snapshot
-//! lives behind an `RwLock`) and every operation is safe without the GIL.
+//! lives in an `ArcSwap`) and every operation is safe without the GIL.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -41,6 +41,12 @@ struct Spec {
     schema: Option<String>,
     /// Unknown-key policy, kept so `refresh()` applies the same one.
     on_unknown: String,
+    /// `true` when the environment was captured by us and `refresh()` must re-read it.
+    refresh_env: bool,
+    /// `true` when `*_FILE` variables must be resolved by reading the files.
+    secret_files: bool,
+    /// Directory that resolved `*_FILE` paths must stay inside.
+    secret_root: Option<String>,
 }
 
 /// Resolved configuration, immutable and queryable by key.
@@ -54,6 +60,59 @@ struct PySettings {
 impl PySettings {
     fn snapshot(&self) -> Arc<Snapshot> {
         self.inner.load_full()
+    }
+
+    /// Rebuilds the spec for a refresh, re-reading the process environment and the secret
+    /// files when they were captured by us.
+    fn fresh_spec(&self) -> PyResult<Spec> {
+        let mut spec = self.spec.clone();
+        if !spec.refresh_env {
+            return Ok(spec);
+        }
+
+        let mut env: BTreeMap<String, String> = std::env::vars().collect();
+
+        if spec.secret_files {
+            let root = spec.secret_root.as_deref().ok_or_else(|| {
+                KeydexError::new_err("secret_root is required when secret_files is enabled")
+            })?;
+            let root = std::fs::canonicalize(root)
+                .map_err(|err| KeydexError::new_err(format!("secret_root {root}: {err}")))?;
+
+            for key in env.keys().cloned().collect::<Vec<_>>() {
+                if !key.ends_with("_FILE") {
+                    continue;
+                }
+                if !spec.env_prefix.is_empty() && !key.starts_with(&spec.env_prefix) {
+                    continue;
+                }
+                let reference = env[&key].clone();
+                let resolved = std::fs::canonicalize(&reference).map_err(|err| {
+                    KeydexError::new_err(format!("{key}: cannot read {reference}: {err}"))
+                })?;
+                if !resolved.starts_with(&root) {
+                    return Err(KeydexError::new_err(format!(
+                        "{key}: {} is outside secret_root ({})",
+                        resolved.display(),
+                        root.display()
+                    )));
+                }
+                let contents = std::fs::read_to_string(&resolved).map_err(|err| {
+                    KeydexError::new_err(format!(
+                        "{key}: cannot read {}: {err}",
+                        resolved.display()
+                    ))
+                })?;
+                env.insert(
+                    key[..key.len() - 5].to_string(),
+                    contents.trim().to_string(),
+                );
+                env.remove(&key);
+            }
+        }
+
+        spec.env = env;
+        Ok(spec)
     }
 }
 
@@ -126,7 +185,8 @@ impl PySettings {
     /// If anything fails the current snapshot is kept: configuration is never left half
     /// applied.
     fn refresh(&self) -> PyResult<()> {
-        let (snapshot, schema) = build_snapshot(&self.spec)?;
+        let spec = self.fresh_spec()?;
+        let (snapshot, schema) = build_snapshot(&spec)?;
         if let Some(schema) = schema {
             if let Err(errors) = coerce(&snapshot, &schema) {
                 let summary = errors
@@ -136,7 +196,7 @@ impl PySettings {
                     .join("; ");
                 return Err(KeydexError::new_err(summary));
             }
-            if self.spec.on_unknown == "error" {
+            if spec.on_unknown == "error" {
                 let unknown = unknown_keys(&snapshot, &schema);
                 if !unknown.is_empty() {
                     let summary = unknown
@@ -158,7 +218,7 @@ impl PySettings {
 }
 
 #[pyfunction]
-#[pyo3(signature = (files, env_prefix = "", env = None, profiles = Vec::new(), sensitive = Vec::new()))]
+#[pyo3(signature = (files, env_prefix = "", env = None, profiles = Vec::new(), sensitive = Vec::new(), refresh_env = true, secret_files = false, secret_root = None))]
 /// Loads one or several files and applies environment variables and profiles.
 ///
 /// `sensitive` lists the keys that must be hidden from `explain`, `items` and `dump`.
@@ -168,6 +228,9 @@ fn load(
     env: Option<HashMap<String, String>>,
     profiles: Vec<String>,
     sensitive: Vec<String>,
+    refresh_env: bool,
+    secret_files: bool,
+    secret_root: Option<String>,
 ) -> PyResult<PySettings> {
     let spec = Spec {
         files,
@@ -180,6 +243,9 @@ fn load(
         sensitive,
         schema: None,
         on_unknown: String::from("warn"),
+        refresh_env,
+        secret_files,
+        secret_root,
     };
     let (snapshot, _) = build_snapshot(&spec)?;
     Ok(PySettings {
@@ -189,7 +255,7 @@ fn load(
 }
 
 #[pyfunction]
-#[pyo3(signature = (ir, files, env_prefix = "", env = None, profiles = Vec::new(), on_unknown = "warn", sensitive = Vec::new()))]
+#[pyo3(signature = (ir, files, env_prefix = "", env = None, profiles = Vec::new(), on_unknown = "warn", sensitive = Vec::new(), refresh_env = true, secret_files = false, secret_root = None))]
 /// Loads with a schema in a single build: the typed tree and the settings share one
 /// snapshot, so `explain` describes exactly what the model was built from.
 ///
@@ -203,6 +269,9 @@ fn load_typed(
     profiles: Vec<String>,
     on_unknown: &str,
     sensitive: Vec<String>,
+    refresh_env: bool,
+    secret_files: bool,
+    secret_root: Option<String>,
 ) -> PyResult<(PySettings, Vec<Py<PyAny>>, Vec<Py<PyAny>>, Py<PyAny>)> {
     let spec = Spec {
         files,
@@ -215,6 +284,9 @@ fn load_typed(
         sensitive,
         schema: Some(ir.to_string()),
         on_unknown: on_unknown.to_string(),
+        refresh_env,
+        secret_files,
+        secret_root,
     };
 
     let (snapshot, schema) = build_snapshot(&spec)?;

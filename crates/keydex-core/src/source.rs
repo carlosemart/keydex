@@ -92,11 +92,18 @@ impl Path {
                     Some('"') => {
                         chars.next();
                         let mut literal = String::new();
+                        let mut escaped = false;
                         for inner in chars.by_ref() {
-                            if inner == '"' {
-                                break;
+                            if escaped {
+                                literal.push(inner);
+                                escaped = false;
+                                continue;
                             }
-                            literal.push(inner);
+                            match inner {
+                                '\\' => escaped = true,
+                                '"' => break,
+                                other => literal.push(other),
+                            }
                         }
                         if chars.peek() == Some(&']') {
                             chars.next();
@@ -124,11 +131,18 @@ impl Path {
                 },
                 '"' => {
                     let mut literal = String::new();
+                    let mut escaped = false;
                     for inner in chars.by_ref() {
-                        if inner == '"' {
-                            break;
+                        if escaped {
+                            literal.push(inner);
+                            escaped = false;
+                            continue;
                         }
-                        literal.push(inner);
+                        match inner {
+                            '\\' => escaped = true,
+                            '"' => break,
+                            other => literal.push(other),
+                        }
                     }
                     segments.push(Segment::Key(literal));
                 }
@@ -188,7 +202,12 @@ pub fn render_path(segments: &[Segment]) -> String {
         match segment {
             Segment::Key(key) if needs_quoting(key) => {
                 out.push_str("[\"");
-                out.push_str(key);
+                for character in key.chars() {
+                    if matches!(character, '"' | '\\') {
+                        out.push('\\');
+                    }
+                    out.push(character);
+                }
                 out.push_str("\"]");
             }
             Segment::Key(key) => {

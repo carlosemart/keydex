@@ -91,6 +91,38 @@ def _node(tp: object, *, required: bool, has_default: bool = False) -> dict:
     raise TypeError(f"unsupported schema type: {tp!r}")
 
 
+def sensitive_paths(model: type, prefix: str = "") -> list[str]:
+    """Paths of the fields declared as `Secret[...]`, so the engine can redact them."""
+    if not dataclasses.is_dataclass(model):
+        return []
+    hints = typing.get_type_hints(model)
+    paths: list[str] = []
+    for field in dataclasses.fields(model):
+        paths.extend(_sensitive_node(hints[field.name], f"{prefix}{field.name}"))
+    return paths
+
+
+def _sensitive_node(tp: object, path: str) -> list[str]:
+    origin = typing.get_origin(tp)
+
+    if origin in (typing.Union, types.UnionType):
+        inner = [arg for arg in typing.get_args(tp) if arg is not type(None)]
+        return _sensitive_node(inner[0], path) if inner else []
+
+    if origin is Secret:
+        return [path]
+
+    if origin in (list, tuple):
+        args = typing.get_args(tp)
+        item = args[0] if args else str
+        return [path] if item is Secret or typing.get_origin(item) is Secret else []
+
+    if dataclasses.is_dataclass(tp):
+        return sensitive_paths(typing.cast("type", tp), f"{path}.")
+
+    return []
+
+
 def build(model: type, tree: dict) -> object:
     """Rebuilds the model from the typed tree returned by the engine."""
     hints = typing.get_type_hints(model)
