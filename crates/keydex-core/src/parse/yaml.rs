@@ -10,7 +10,7 @@ use crate::value::{Node, Span, Value};
 pub(super) fn parse(src: &str, file: &str) -> Result<Vec<Node>> {
     let docs = MarkedYaml::load_from_str(src).map_err(|err| Error::Parse {
         file: file.to_string(),
-        message: format!("{err:?}"),
+        message: err.to_string(),
     })?;
 
     Ok(docs.iter().map(|doc| to_node(doc, file)).collect())

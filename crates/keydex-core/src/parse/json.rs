@@ -15,7 +15,7 @@ pub(super) fn parse(src: &str, file: &str) -> Result<Vec<Node>> {
     let parsed = jsonc_parser::parse_to_ast(src, &Default::default(), &Default::default())
         .map_err(|err| Error::Parse {
             file: file.to_string(),
-            message: format!("{err:?}"),
+            message: err.to_string(),
         })?;
 
     let index = LineIndex::new(src);
