@@ -42,6 +42,8 @@ keydex.load(App, files=[...], on_unknown="error")
 - The key does not exist (typos are not guessed).
 - You are on a typed model: a dataclass has no provenance. Use
   `keydex.Environment(...)`, call `load(App)` and then `env.explain(...)`.
+- You called `Environment.explain()` before `load()`: there is no snapshot yet and it raises
+  `KeydexError("call load() before using the environment")`.
 
 ## `explain()` shows `value: null, redacted: true`
 
@@ -79,8 +81,9 @@ A typed model is a copy. `refresh()` updates the snapshot used by `explain`; cal
 
 ## `refresh()` raised
 
-The new configuration is invalid and the previous snapshot is still serving. The exception
-carries the same `errors` list as a normal load; fix it and call `refresh()` again.
+The new configuration is invalid and the previous snapshot is still serving. `refresh()`
+raises `KeydexError` with a summary of the problems as its message (not a `ValidationError`
+with `.errors`); fix them and call `refresh()` again.
 
 ## The build is green but the gate complains
 

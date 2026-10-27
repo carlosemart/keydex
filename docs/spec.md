@@ -133,7 +133,8 @@ Additional rules:
 **Implemented:** YAML (through `saphyr`), TOML (through `toml_edit`) and JSON (through
 `jsonc-parser`, which also accepts JSONC).
 
-**Planned:** INI, `.properties`, `.env` and YAML multi-document.
+**Implemented:** YAML multi-document (documents merge in order). **Planned:** INI,
+`.properties`, `.env`.
 
 Technical requirement: parsers must preserve **spans** (line/column) because `explain`
 exposes them. That drives the dependency choice (§17.3).
@@ -170,7 +171,8 @@ With a schema, binding **does not guess**: the schema disambiguates.
 ### 6.1 Key normalisation
 
 `dbHost`, `db-host`, `db_host`, `DB_HOST` are the same key. The canonical form is
-`snake_case` with `.` between levels and `[i]` for indices.
+`snake_case` with `.` between levels and `[i]` for indices. User-facing syntax (literal
+keys, quoting, escapes) lives in the [key reference](reference/keys.md).
 
 ### 6.2 Environment variables → keys
 
@@ -245,16 +247,9 @@ missing scalar is a required error, and `Optional` without a value resolves to `
 
 ### 8.1 Syntax
 
-| Form | Meaning | Status |
-|---|---|---|
-| `${db.host}` | Absolute reference | Implemented |
-| `${db.host:-localhost}` | With a default value | Implemented |
-| `${env:HOME}` | `env` resolver | Implemented |
-| `${env:NOPE:-fallback}` | Resolver with default | Implemented |
-| `${a:-${b}}` | Nested defaults | Implemented |
-| `\${...}` | Literal escape | Implemented |
-| `${.sibling}` | Relative reference (sibling) | Planned |
-| `${..parent.key}` | Upward relative reference | Planned |
+The grammar is normative here and reproduced for users in the
+[interpolation reference](reference/interpolation.md); this section only fixes what the
+engine must do.
 
 A string that is exactly one placeholder inherits the type of the referenced value;
 `"${...}"` inside a larger string is rendered as text.
@@ -426,11 +421,11 @@ Rules:
 - **Redaction depends on the caller.** A key declared `sensitive` (via `sensitive=[...]`
   or derived from `*_FILE`) is returned with `value: None` and `redacted: True`;
   `reveal=True` shows it. Keys not declared sensitive are returned in the clear: in
-  dictionary mode there is no schema to know which values are secret. `get()` and `[]`
-  always return the raw value.
+  dictionary mode there is no schema to know which values are secret. `get()`
+  returns the raw value; `[]`, `items()`, `dump()` and `dict(settings)` redact.
 - `dump` is deterministic and uses `items()`, which applies the same redaction.
-- `explain` exists on `Settings` (dictionary mode). A typed model is a plain dataclass and
-  has no provenance; load with `load_settings` when you need it.
+- `explain` exists on `Settings` and on `Environment`. A bare typed model is a dataclass
+  and has no provenance.
 - CLI equivalent: `python -m keydex explain db.host` (add `--reveal` to see sensitive
   values).
 
@@ -446,15 +441,14 @@ Sensitivity is a **property of the node**, not a wrapper applied at the end:
 - Interpolation propagates it: a value built from a secret (`dsn: "${password}@host"`) is
   itself sensitive.
 - `explain`, `items`, `dump` and the CLI redact sensitive values (`value: None`,
-  `redacted: true`); `reveal=True` / `--reveal` is the only way to see them. `get()` and `[]`
-  return the raw value by design.
+  `redacted: true`); `reveal=True` / `--reveal` is the only way to see them. `get()` returns the raw value; `[]`,
+  `items()` and `dict(settings)` redact.
 - `Secret[T]` is the typed presentation of a sensitive node: `repr`, `str` and dataclass
   printing show `Secret('***')`.
 - `*_FILE` is opt-in (`secret_files=True`) and confined to `secret_root`.
 
-**Planned:** `zeroize` for the Rust buffers, marking sensitivity from the IR (`Secret[T]`
-currently protects through the Python wrapper only, not through `explain`), and remote
-secret sources (keyring, Vault, 1Password, Bitwarden, SOPS).
+**Planned:** `zeroize` for the Rust buffers and remote secret sources (keyring, Vault,
+1Password, Bitwarden, SOPS).
 
 ---
 
@@ -507,6 +501,9 @@ def load(
     env: Mapping[str, str] | None = None,
     profiles: Sequence[str] = (),
     on_unknown: Literal["warn", "error", "ignore"] = "warn",
+    sensitive: Sequence[str] = (),
+    secret_files: bool = False,
+    secret_root: str | PathLike | None = None,
 ) -> T: ...
 
 def load_settings(
@@ -514,11 +511,25 @@ def load_settings(
     env_prefix: str = "",
     env: Mapping[str, str] | None = None,
     profiles: Sequence[str] = (),
+    *,
+    sensitive: Sequence[str] = (),
+    secret_files: bool = False,
+    secret_root: str | PathLike | None = None,
 ) -> Settings: ...
 
-class Settings(Mapping[str, Any]):
-    def get(self, key: str, default: Any = None) -> Any: ...
-    def explain(self, key: str) -> dict | None: ...
+class Environment:
+    def __init__(self, *, files=(), env_prefix="", env=None, profiles=(),
+                 on_unknown="warn", sensitive=(), secret_files=False,
+                 secret_root=None) -> None: ...
+    def load(self, model: type[T]) -> T: ...
+    def explain(self, key: str, reveal: bool = False) -> dict | None: ...
+    def settings(self) -> Settings: ...
+    def refresh(self) -> None: ...
+
+class Settings:
+    def get(self, key: str, default: Any = None) -> Any: ...   # raw value
+    def __getitem__(self, key: str) -> Any: ...                # redacts
+    def explain(self, key: str, reveal: bool = False) -> dict | None: ...
     def refresh(self) -> None: ...
 ```
 
@@ -598,7 +609,7 @@ half an ecosystem.
 
 | Metric | Target | Measured |
 |---|---|---|
-| Cold load, 1k YAML keys + env | < 5 ms | 1.26 ms |
+| Cold load, 1k YAML keys + env | < 5 ms | ~2 ms ([benchmarks](benchmarks.md)) |
 | Attribute access | ±10% vs native dataclass (0 FFI) | native |
 | `explain()` | < 100 µs | < 10 µs |
 | Snapshot memory | < 3× the source text | not measured |
@@ -621,7 +632,7 @@ cached resolution which is implemented.
 
 | Artifact | Covers | Status |
 |---|---|---|
-| `abi3-py311` | 3.11, 3.12, 3.13, 3.14, 3.15 (with the GIL) | published |
+| `abi3-py311` | 3.11, 3.12, 3.13, 3.14, 3.15 (with the GIL) | built, **not published** |
 | `cp314t` | 3.14 free-threaded, `gil_used = false` | built and tested in CI, **not published** until reads are lock-free |
 
 `abi3` and `t` are mutually exclusive today (PEP 803 `abi3t` does not exist yet): two build
@@ -634,7 +645,8 @@ profiles with maturin.
 | `lint` | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo check -p keydex-py` |
 | `test` | `cargo test` on `keydex-core` |
 | `gate` | `cargo deny` plus the "no `pyo3` in the core" invariant |
-| `python` | builds the wheel with maturin, installs it, runs 44 Python tests |
+| `python` | builds the wheel with maturin, installs it, runs the Python suite |
+| `docs` | `cargo doc -D warnings` and `mkdocs build --strict` |
 | `python-freethreaded` | builds `cp314t`, asserts `sys._is_gil_enabled()` is `False`, runs the suite |
 
 **Planned:** fuzzing, benchmarks with regression gates.
@@ -676,14 +688,15 @@ Implemented:
 |---|---|---|
 | **F0** ✅ | Workspace, `AGENTS.md` + `docs/spec.md` + gates, parser spans spike, error skeleton | Correct spans and `./scripts/gate.sh` green |
 | **F1** ✅ | `keydex-core` (sources, merge, interp, snapshot) + `keydex-py` dict mode | YAML+env load, `${}`, `explain`, benchmark vs OmegaConf |
-| **F2** ✅ | Typed schema: dataclasses, coercion, aggregated validation | `load(App)` complete with per-path errors. Generated `.pyi` is not needed: dataclasses already type mypy and the IDE |
+| **F2** ✅ | Typed schema: dataclasses, coercion, aggregated validation | `load(App)` complete with per-path errors |
 | **F3** ✅ | Profiles by file convention, secrets (`Secret`, `*_FILE`), `refresh()`, CLI | Suite green; secrets do not leak in `repr` |
 | **F3.1** ✅ | Unknown keys (`on_unknown`) with edit-distance suggestions | Warning raised on a real migration mistake |
 | **F4** | Publication: wheels, crates.io, docs | Installable from PyPI on 3.11–3.14t |
 | **F5 (v2)** | `watch()`, async remote sources, Hydra-style composition plugin | Only with real demand |
 
-Dogfooding: `examples/homelab-demo` exercises the full surface. The next step is migrating
-one real module of a non-Python-shaped project.
+Feature-level status lives in [status](status.md); this table is the phase history.
+
+Dogfooding: `examples/homelab-demo` exercises the full surface.
 
 ---
 

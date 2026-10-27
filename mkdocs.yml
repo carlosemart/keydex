@@ -17,6 +17,9 @@ nav:
   - Rust guide: rust.md
   - Architecture: architecture.md
   - API reference: api.md
+  - Reference:
+      - Key syntax: reference/keys.md
+      - Interpolation: reference/interpolation.md
   - Troubleshooting: troubleshooting.md
   - Coming from another library: migration.md
   - Status: status.md

@@ -2,9 +2,8 @@
 
 Configuration access for Python: **typed, explainable and fast**, with the engine in Rust.
 
-> Status: 0.1.0. Typed models, profiles, secrets, `refresh()` and a CLI. Pending: F4
-> publication of wheels and remote sources. PyPI only has a name-reservation placeholder,
-> so install from the repository for now.
+> Status: 0.1.0 in the repository, **not published**. What exists and what does not:
+> [docs/status.md](docs/status.md). Install from the repository for now.
 
 ## Install
 
@@ -77,6 +76,7 @@ The `explain` output is a structure, not text:
 {
   "key": "db.host",
   "value": "env.internal",
+  "redacted": false,
   "winner": {"source": "env", "tier": 2, "file": None, "line": None, "col": None},
   "shadowed": [
     {"source": "file:config/app.yaml", "tier": 4,

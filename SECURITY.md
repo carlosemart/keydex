@@ -16,8 +16,8 @@
 
 ## What is not protected
 
-- `Settings.get(key)` and `Settings["key"]` return the **raw** value. That is the point of
-  the API; do not log their result.
+- `Settings.get(key)` returns the **raw** value. That is the point of the API; do not log
+  its result. `settings[key]`, `items()`, `dump()` and `dict(settings)` redact.
 - In dictionary mode, a key is only redacted if it is declared sensitive, either through
   the `sensitive=[...]` argument or because it came from `*_FILE`. There is no guessing by
   key name.

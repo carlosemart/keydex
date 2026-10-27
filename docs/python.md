@@ -83,6 +83,10 @@ env.refresh()                # re-reads and revalidates; raises if the config is
 A typed model is a copy: after `refresh()` call `env.load(App)` again to get an updated one.
 If `refresh()` fails, the previous snapshot keeps serving.
 
+`refresh()` re-reads the process environment and the `*_FILE` secrets, unless you injected
+`env=` yourself — then it re-reads only the files and reuses your map. Call `load()` before
+`explain()`/`settings()`; before the first load the environment has no snapshot yet.
+
 ## Environment binding
 
 With a model, the schema disambiguates, so you do not need double underscores:
@@ -159,6 +163,8 @@ name: "${env:APP_NAME:-anonymous}"
 - Resolved once, after the merge, so `url` follows a `host` overridden by a profile.
 - Supported: `${key}`, `${key:-default}`, `${env:VAR}`, `${env:VAR:-default}`, nested
   defaults and `\${escaped}`. Relative references (`${.sibling}`) are planned.
+- Full grammar: [interpolation reference](reference/interpolation.md). Key and path syntax:
+  [keys reference](reference/keys.md).
 - Cycles and missing references (without a default) are errors at load time.
 
 ## Secrets
@@ -275,9 +281,4 @@ instead of mutating `os.environ`.
 
 ## What it does not do yet
 
-- `imports:` / `includes:` between files.
-- Remote sources (Vault, S3, Consul) and `watch()`.
-- `pydantic`, `attrs` and `msgspec` models (dataclasses only for now).
-- Validation ranges, regex or custom validators.
-
-See [the specification](spec.md) for the agreed design of each one.
+See [status](status.md): it is the single list of what exists and what is missing.

@@ -11,99 +11,78 @@ First functional release. `0.0.1` was only a name reservation.
 
 ### Added
 
-- **Engine** (`keydex-core`): span-preserving parsers for YAML, TOML and JSON;
-  precedence by bands with ordering inside a band; `${...}` interpolation with defaults,
-  resolvers and cycle detection; per-value provenance.
-- **Schema IR v1** and typed models: coercion, aggregated validation with paths, relaxed
-  binding against the schema (`APP_DB_HOST` → `db.host` without `__`), and a warning for
-  keys the schema does not use (`on_unknown`), with edit-distance suggestions.
+- **Engine** (`keydex-core`): span-preserving parsers for YAML (including multi-document
+  files and `<<: *anchor` merge keys), TOML and JSON; structural merge by precedence tier;
+  `${...}` interpolation with defaults, resolvers, nested defaults, escapes and cycle
+  detection; per-value provenance and sensitivity.
+- **Schema IR v1** and typed models: `str`, `int`, `float`, `bool`, `Optional`, `list`,
+  `dict[str, T]`, nested dataclasses, `Enum`, `Path`, `Decimal`, `UUID` and `Secret[T]`;
+  coercion and aggregated validation with path, file, line and column; relaxed binding
+  against the schema (`APP_DB_HOST` → `db.host`); unknown keys with edit-distance
+  suggestions (`on_unknown`).
 - **Profiles** through a file naming convention (`app-prod.yaml`).
-- **Secrets**: `Secret[T]` with a redacted representation, opt-in `*_FILE`
-  indirection confined to `secret_root`, and redaction of declared keys in `explain`,
-  `items` and `dump`.
-- **`refresh()`** with atomic snapshot swap.
-- **CLI**: `python -m keydex explain|dump`.
-- **Wheels**: `abi3-py311` (3.11–3.15) published; `cp314t` is built and tested in CI
-  (`gil_used = false`, GIL verified off) but not published until reads are lock-free.
+- **Secrets**: `Secret[T]` marked sensitive in the snapshot; opt-in `*_FILE` confined to
+  `secret_root` (the variable is removed from the environment after resolving); redaction
+  in `explain`, `items`, `dump`, `settings[key]` and `dict(settings)`; `get()` is the raw
+  escape hatch.
+- **`Environment`**: one build returns the typed model and keeps the snapshot used by
+  `explain`, `settings()` and `refresh()`; `refresh()` re-reads environment and secrets,
+  revalidates, and keeps the previous snapshot when the new configuration is invalid.
+- **Extension traits** `Source` and `Resolver`; `env` is a built-in resolver. `Format` is
+  still a closed enum.
+- **Lock-free reads**: the snapshot lives in an `ArcSwap` (ADR 0008).
+- **CLI**: `python -m keydex explain|dump`, with `--reveal`, `--sensitive`,
+  `--secret-files` and `--secret-root`.
+- **Wheels**: `abi3-py311` built; `cp314t` built and tested in CI with the GIL verified
+  off. **Nothing is published yet.**
 - Runnable example: [`examples/homelab-demo`](examples/homelab-demo/).
-- Architecture gates (`scripts/gate.sh`, `clippy.toml`) and ADRs
-  [0006](docs/adr/0006-parsers-with-spans.md) and
-  [0007](docs/adr/0007-schema-ir-over-serde.md).
-- Load benchmark: 1.26 ms for 1004 keys, 21× faster than OmegaConf
-  ([details](docs/benchmarks.md)).
-
-### Added
-
-- `dict[str, T]`: free-form maps, validated per value, bindable from the environment with
-  `APP_MAP__KEY`, and unknown-key detection treats their keys as known.
+- Architecture gates (`scripts/gate.sh` with a self-test, `clippy.toml`, `deny.toml`) and
+  ADRs [0006](docs/adr/0006-parsers-with-spans.md),
+  [0007](docs/adr/0007-schema-ir-over-serde.md) and
+  [0008](docs/adr/0008-arc-swap-lock-free-reads.md).
 
 ### Changed
 
-- `settings[key]` and `dict(settings)` now redact sensitive values, like `items()` and
-  `dump`. `get()` remains the raw escape hatch.
+- `settings[key]` and `dict(settings)` redact sensitive values, like `items()` and `dump`.
+  `get()` remains the raw escape hatch.
 
 ### Fixed
 
-- Lists are replaced whole by a higher-priority source instead of merged by index: a base
-  `tags: [a, b]` plus a profile `tags: [c]` now yields `[c]`, and `tags: []` clears it.
-  The value model is a tree (`Value::Seq`/`Value::Map`), so a scalar can also replace a
-  whole subtree. Literal keys containing dots no longer collide with nested paths.
-- Sensitivity is a property of the node: it survives the merge, propagates through
-  interpolation (a value built from a secret is redacted too), and drives redaction in
-  `explain`, `items`, `dump` and the CLI.
-- The Schema IR is a validated type (`enum`, `path`, `decimal`, `uuid`, `secret`), so the
+- Lists are replaced whole by a higher-priority source; `[]` clears a lower one, and a
+  scalar replaces the whole subtree. Literal keys containing dots no longer collide with
+  nested paths.
+- Sensitivity survives the merge and propagates through interpolation: a value built from
+  a secret is redacted too.
+- The IR is a validated type (`enum`, `path`, `decimal`, `uuid`, `secret`, `map`), so the
   engine checks enum membership, decimal and UUID lexemes, and rejects a structurally
-  invalid IR at parse time instead of returning `null`.
-- Validation errors carry the file, line and column of the offending value, and an invalid
-  `Enum`/`Decimal`/`UUID` is now a `ValidationError` instead of a raw Python exception.
+  invalid IR at parse time.
+- `Secret[T]` fields are marked sensitive, so `explain` redacts them instead of printing the
+  value.
+- `refresh()` re-reads the process environment and the `*_FILE` secrets, and the `*_FILE`
+  variable no longer becomes a configuration key.
+- `Path` render/parse round-trips keys containing quotes and backslashes; YAML merge keys are
+  resolved.
 - An `Optional[T]` with a dataclass default keeps that default when the key is absent.
-- `Environment`: one build produces the typed model and the snapshot used by `explain`,
-  `settings()` and `refresh()`; the homelab demo no longer loads the configuration twice.
-  `refresh()` revalidates and keeps the previous snapshot when the new configuration is
-  invalid.
-
-### Added
-
-- `Source` and `Resolver` traits: a caller can add its own source (CLI, Vault, a fixture)
-  or its own `${name:args}` resolver without touching the core. `env` is now a built-in
-  resolver rather than a special case.
-- Lock-free reads: the snapshot lives in an `ArcSwap`, so `get`/`explain` take no lock and
-  `refresh()` swaps the pointer (ADR 0008).
-- The benchmark now measures the typed path too (200 fields, 1.23 ms).
 
 ### Documentation
 
-- New [architecture](docs/architecture.md) page: component diagram, module
-  responsibilities, load lifecycle, data model, extension seams and cross-cutting concerns.
-- New [status](docs/status.md), [install](docs/install.md),
-  [troubleshooting](docs/troubleshooting.md), [migration](docs/migration.md) and
-  [contributing](docs/contributing.md) pages, so the guides stop duplicating the same facts.
+- [Architecture](docs/architecture.md) with a component diagram, module responsibilities,
+  load lifecycle, data model and extension seams.
+- [Status](docs/status.md) as the single list of what exists and what is missing, plus
+  [install](docs/install.md), [troubleshooting](docs/troubleshooting.md),
+  [migration](docs/migration.md) and [contributing](docs/contributing.md).
 
-### Added
+### Performance
 
-- `dict[str, T]`: free-form maps, validated per value, bindable from the environment with
-  `APP_MAP__KEY`, and unknown-key detection treats their keys as known.
-
-### Changed
-
-- `settings[key]` and `dict(settings)` now redact sensitive values, like `items()` and
-  `dump`. `get()` remains the raw escape hatch.
-
-### Fixed
-
-- `Secret[T]` fields are marked sensitive in the snapshot, so `explain` redacts them instead
-  of printing the value.
-- `refresh()` re-reads the process environment and the `*_FILE` secrets instead of serving
-  the ones captured at load time.
-- The `*_FILE` variable no longer becomes a configuration key (it exposed the path and
-  produced an unknown-key warning).
-- `Path` render/parse round-trips keys containing quotes and backslashes.
-- YAML merge keys (`<<: *anchor`) are resolved, with explicit keys winning.
+- See [benchmarks](docs/benchmarks.md). One dated run, no CI gate.
 
 ### Known limitations
 
-- `imports:` / `includes:` not implemented (see specification §9.3).
-- No remote sources (Vault, S3, Consul) and no `watch()`.
+- Not published: PyPI holds the `0.0.1` reservation and crates.io the `keydex-core` one.
+- `imports:` / `includes:`, remote sources and `watch()` are not implemented.
+- `Format` is a closed enum; adding a format means editing the core.
+- No validation ranges/regex, no `datetime`/`duration`/`size`, and no
+  `pydantic`/`attrs`/`msgspec` models.
 
 ## [0.0.1] - 2026-10-27
 

@@ -7,14 +7,15 @@ Methodology: median of 50 runs, empty environment, AMD Ryzen 9 7940HS, Python 3.
 
 | Operation | Median |
 |---|---|
-| `keydex.load` (typed, 200 fields) | **1.23 ms** |
-| `keydex.load_settings` (1000 keys) | **2.03 ms** |
-| `OmegaConf.load` (1000 keys) | 42.96 ms |
+| `keydex.load` (typed, 200 fields) | **1.93 ms** |
+| `keydex.load_settings` (1000 keys) | **2.18 ms** |
+| `OmegaConf.load` (1000 keys) | 43.07 ms |
 | `cfg.explain("k0500")` | < 0.01 ms |
 | `oc.k0500` access (OmegaConf) | < 0.01 ms |
 
-**21× faster than OmegaConf** for dictionary mode, and inside the specification budget
-(< 5 ms for 1000 keys).
+**~20× faster than OmegaConf** for dictionary mode (19.7× in this run), and inside the
+specification budget (< 5 ms for 1000 keys). Repeated runs vary by roughly 10%: earlier
+runs gave 1.2–2.2 ms, so treat the ratio as "about 20×", not a precise figure.
 
 Two caveats, because they matter:
 
