@@ -51,7 +51,7 @@ cargo test --workspace
 ## Terminado cuando
 
 - [ ] hay un test que falla sin el cambio
-- [ ] `just check`, `just gate` y `just test` en verde
+- [ ] `./scripts/check.sh` y `./scripts/gate.sh` en verde, y `cargo test --workspace` pasando
 - [ ] sin regresión de rendimiento cuando exista banco de pruebas
 - [ ] `docs/spec.md` actualizado si cambió el comportamiento
 - [ ] entrada en `CHANGELOG.md`
