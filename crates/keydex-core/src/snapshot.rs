@@ -2,6 +2,7 @@
 
 use crate::source::{Path, Segment, render_path};
 use crate::value::{Node, Provenance, Value};
+use crate::walk;
 
 /// Explanation of a key: the value and why it is that value.
 #[derive(Debug, Clone)]
@@ -18,20 +19,34 @@ pub struct Explanation {
     pub refs: Vec<String>,
 }
 
+/// A leaf, with its rendered path and its segments, so iteration does not re-parse.
+#[derive(Debug, Clone)]
+struct Leaf {
+    rendered: String,
+    segments: Vec<Segment>,
+}
+
 /// Resolved and immutable configuration.
 ///
-/// It holds the merged tree plus the list of leaf paths, so `keys()` is deterministic and
-/// cheap. It is the only state shared between threads.
+/// It holds the merged tree plus its leaves. It is the only state shared between threads.
 #[derive(Debug, Clone, Default)]
 pub struct Snapshot {
     root: Node,
-    leaves: Vec<String>,
+    leaves: Vec<Leaf>,
 }
 
 impl Snapshot {
     pub(crate) fn new(root: Node) -> Self {
         let mut leaves = Vec::new();
-        collect(&root, &mut Vec::new(), &mut leaves);
+        let mut path = Vec::new();
+        walk::visit(&root, &mut path, &mut |segments, node| {
+            if !node.value.is_container() {
+                leaves.push(Leaf {
+                    rendered: render_path(segments),
+                    segments: segments.to_vec(),
+                });
+            }
+        });
         Self { root, leaves }
     }
 
@@ -65,14 +80,14 @@ impl Snapshot {
 
     /// Leaf keys in lexicographic order.
     pub fn keys(&self) -> impl Iterator<Item = &str> {
-        self.leaves.iter().map(String::as_str)
+        self.leaves.iter().map(|leaf| leaf.rendered.as_str())
     }
 
-    /// Leaf keys and values in lexicographic order.
+    /// Leaf keys and values in lexicographic order, without re-parsing the paths.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &Value)> {
-        self.leaves
-            .iter()
-            .filter_map(|key| self.get(key).map(|value| (key.as_str(), value)))
+        self.leaves.iter().filter_map(|leaf| {
+            navigate(&self.root, &leaf.segments).map(|node| (leaf.rendered.as_str(), &node.value))
+        })
     }
 
     /// `true` when the value must be hidden from diagnostic output.
@@ -107,25 +122,5 @@ fn navigate<'a>(node: &'a Node, segments: &[Segment]) -> Option<&'a Node> {
             items.get(*index).and_then(|child| navigate(child, rest))
         }
         _ => None,
-    }
-}
-
-fn collect(node: &Node, segments: &mut Vec<Segment>, out: &mut Vec<String>) {
-    match &node.value {
-        Value::Map(entries) => {
-            for (key, child) in entries {
-                segments.push(Segment::Key(key.clone()));
-                collect(child, segments, out);
-                segments.pop();
-            }
-        }
-        Value::Seq(items) => {
-            for (index, child) in items.iter().enumerate() {
-                segments.push(Segment::Index(index));
-                collect(child, segments, out);
-                segments.pop();
-            }
-        }
-        _ => out.push(render_path(segments)),
     }
 }

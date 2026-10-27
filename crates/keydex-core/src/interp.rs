@@ -8,8 +8,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{Error, Result};
 use crate::resolve::Resolvers;
-use crate::source::{Segment, render_path};
+use crate::source::render_path;
 use crate::value::{Node, Value};
+use crate::walk;
 
 /// Origin of a reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -293,10 +294,25 @@ pub(crate) fn resolve_tree(
     resolvers: &Resolvers,
 ) -> Result<()> {
     let mut raw = BTreeMap::new();
-    collect_leaves(root, &mut Vec::new(), &mut raw);
+    walk::visit(root, &mut Vec::new(), &mut |segments, node| {
+        if !node.value.is_container() {
+            raw.insert(render_path(segments), node.value.clone());
+        }
+    });
 
     let (values, refs) = resolve_all(&raw, env, resolvers)?;
-    apply_leaves(root, &mut Vec::new(), &values, &refs);
+
+    walk::visit_mut(root, &mut Vec::new(), &mut |segments, node| {
+        if node.value.is_container() {
+            return;
+        }
+        let key = render_path(segments);
+        if let Some(value) = values.get(&key) {
+            node.value = value.clone();
+        }
+        node.refs = refs.get(&key).cloned().unwrap_or_default();
+    });
+
     propagate_sensitivity(root);
     Ok(())
 }
@@ -304,13 +320,24 @@ pub(crate) fn resolve_tree(
 /// A value built from a sensitive reference is sensitive too.
 fn propagate_sensitivity(root: &mut Node) {
     let mut sensitive = BTreeSet::new();
-    collect_sensitive(root, &mut Vec::new(), &mut sensitive);
+    let mut refs: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    walk::visit(root, &mut Vec::new(), &mut |segments, node| {
+        if node.value.is_container() {
+            return;
+        }
+        let key = render_path(segments);
+        if node.sensitive {
+            sensitive.insert(key.clone());
+        }
+        if !node.refs.is_empty() {
+            refs.insert(key, node.refs.clone());
+        }
+    });
+
     if sensitive.is_empty() {
         return;
     }
-
-    let mut refs: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    collect_refs(root, &mut Vec::new(), &mut refs);
 
     loop {
         let mut changed = false;
@@ -328,131 +355,12 @@ fn propagate_sensitivity(root: &mut Node) {
         }
     }
 
-    apply_sensitivity(root, &mut Vec::new(), &sensitive);
-}
-
-fn collect_sensitive(node: &Node, segments: &mut Vec<Segment>, out: &mut BTreeSet<String>) {
-    if node.sensitive {
-        out.insert(render_path(segments));
-    }
-    match &node.value {
-        Value::Map(entries) => {
-            for (key, child) in entries {
-                segments.push(Segment::Key(key.clone()));
-                collect_sensitive(child, segments, out);
-                segments.pop();
-            }
-        }
-        Value::Seq(items) => {
-            for (index, child) in items.iter().enumerate() {
-                segments.push(Segment::Index(index));
-                collect_sensitive(child, segments, out);
-                segments.pop();
-            }
-        }
-        _ => {}
-    }
-}
-
-fn collect_refs(node: &Node, segments: &mut Vec<Segment>, out: &mut BTreeMap<String, Vec<String>>) {
-    match &node.value {
-        Value::Map(entries) => {
-            for (key, child) in entries {
-                segments.push(Segment::Key(key.clone()));
-                collect_refs(child, segments, out);
-                segments.pop();
-            }
-        }
-        Value::Seq(items) => {
-            for (index, child) in items.iter().enumerate() {
-                segments.push(Segment::Index(index));
-                collect_refs(child, segments, out);
-                segments.pop();
-            }
-        }
-        _ => {
-            if !node.refs.is_empty() {
-                out.insert(render_path(segments), node.refs.clone());
-            }
-        }
-    }
-}
-
-fn apply_sensitivity(node: &mut Node, segments: &mut Vec<Segment>, sensitive: &BTreeSet<String>) {
-    match &mut node.value {
-        Value::Map(entries) => {
-            for (key, child) in entries.iter_mut() {
-                segments.push(Segment::Key(key.clone()));
-                apply_sensitivity(child, segments, sensitive);
-                segments.pop();
-            }
-        }
-        Value::Seq(items) => {
-            for (index, child) in items.iter_mut().enumerate() {
-                segments.push(Segment::Index(index));
-                apply_sensitivity(child, segments, sensitive);
-                segments.pop();
-            }
-        }
-        _ => {
-            if sensitive.contains(&render_path(segments)) {
-                node.sensitive = true;
-            }
-        }
-    }
-}
-
-fn collect_leaves(node: &Node, segments: &mut Vec<Segment>, out: &mut BTreeMap<String, Value>) {
-    match &node.value {
-        Value::Map(entries) => {
-            for (key, child) in entries {
-                segments.push(Segment::Key(key.clone()));
-                collect_leaves(child, segments, out);
-                segments.pop();
-            }
-        }
-        Value::Seq(items) => {
-            for (index, child) in items.iter().enumerate() {
-                segments.push(Segment::Index(index));
-                collect_leaves(child, segments, out);
-                segments.pop();
-            }
-        }
-        value => {
-            out.insert(render_path(segments), value.clone());
-        }
-    }
-}
-
-fn apply_leaves(
-    node: &mut Node,
-    segments: &mut Vec<Segment>,
-    values: &BTreeMap<String, Value>,
-    refs: &BTreeMap<String, Vec<String>>,
-) {
-    match &mut node.value {
-        Value::Map(entries) => {
-            for (key, child) in entries.iter_mut() {
-                segments.push(Segment::Key(key.clone()));
-                apply_leaves(child, segments, values, refs);
-                segments.pop();
-            }
+    walk::visit_mut(root, &mut Vec::new(), &mut |segments, node| {
+        if node.value.is_container() {
             return;
         }
-        Value::Seq(items) => {
-            for (index, child) in items.iter_mut().enumerate() {
-                segments.push(Segment::Index(index));
-                apply_leaves(child, segments, values, refs);
-                segments.pop();
-            }
-            return;
+        if sensitive.contains(&render_path(segments)) {
+            node.sensitive = true;
         }
-        _ => {}
-    }
-
-    let key = render_path(segments);
-    if let Some(value) = values.get(&key) {
-        node.value = value.clone();
-    }
-    node.refs = refs.get(&key).cloned().unwrap_or_default();
+    });
 }

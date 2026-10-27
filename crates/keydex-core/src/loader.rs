@@ -16,6 +16,7 @@ use crate::parse::{self, Format};
 use crate::resolve::{Resolver, Resolvers};
 use crate::source::{Path, Segment, Source, SourceId, Tier};
 use crate::value::{Node, Provenance, Value};
+use crate::walk;
 
 /// Snapshot builder.
 pub struct Builder {
@@ -238,42 +239,19 @@ fn node_at_mut<'a>(node: &'a mut Node, segments: &[Segment]) -> Option<&'a mut N
 
 /// Marks a node and everything under it as sensitive.
 fn mark_subtree(node: &mut Node) {
-    node.sensitive = true;
-    match &mut node.value {
-        Value::Map(entries) => {
-            for child in entries.values_mut() {
-                mark_subtree(child);
-            }
-        }
-        Value::Seq(items) => {
-            for child in items.iter_mut() {
-                mark_subtree(child);
-            }
-        }
-        _ => {}
-    }
+    walk::visit_mut(node, &mut Vec::new(), &mut |_, child| {
+        child.sensitive = true;
+    });
 }
 
 /// Attaches the source's provenance to every node of the tree.
 fn stamp(node: &mut Node, id: &SourceId) {
-    node.provenance = Some(Provenance {
-        source: id.name.clone(),
-        tier: id.tier,
-        order: id.order,
-        span: node.span.clone(),
+    walk::visit_mut(node, &mut Vec::new(), &mut |_, child| {
+        child.provenance = Some(Provenance {
+            source: id.name.clone(),
+            tier: id.tier,
+            order: id.order,
+            span: child.span.clone(),
+        });
     });
-
-    match &mut node.value {
-        Value::Map(entries) => {
-            for child in entries.values_mut() {
-                stamp(child, id);
-            }
-        }
-        Value::Seq(items) => {
-            for child in items.iter_mut() {
-                stamp(child, id);
-            }
-        }
-        _ => {}
-    }
 }

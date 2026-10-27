@@ -48,9 +48,10 @@ embeddable on its own.
 | `resolve` | `Resolver` trait, registry, built-in `env` | files |
 | `interp` | placeholder grammar, topological resolution, cycles, sensitivity propagation | I/O |
 | `loader` | `Builder`: sources, ordering, merge, interpolation, snapshot | Python |
-| `schema` | IR parsing and validation, relaxed binding, coercion, unknown keys | Python types |
+| `schema` | IR parsing and validation, relaxed binding, coercion, unknown keys (split in `mod`/`bind`/`coerce`/`unknown`) | Python types |
 | `snapshot` | immutable tree, leaf index, `explain` | building |
 | `error` | structured errors | formatting |
+| `walk` | the single tree visitor every stage uses | any policy |
 
 Python side:
 

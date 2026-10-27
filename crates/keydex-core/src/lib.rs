@@ -81,6 +81,7 @@ mod schema;
 mod snapshot;
 mod source;
 mod value;
+mod walk;
 
 pub use error::{Error, Result};
 pub use loader::Builder;
@@ -88,7 +89,9 @@ pub use parse::{Format, LineIndex};
 pub use resolve::{EnvResolver, Resolver, Resolvers};
 #[cfg(feature = "schema")]
 #[cfg_attr(docsrs, doc(cfg(feature = "schema")))]
-pub use schema::{Field, IR_VERSION, Schema, UnknownKey, ValidationError, coerce, unknown_keys};
+pub use schema::{
+    Coerced, Field, IR_VERSION, Schema, UnknownKey, ValidationError, coerce, unknown_keys,
+};
 pub use snapshot::{Explanation, Snapshot};
 pub use source::{ParsedSource, Path, Segment, Source, SourceId, Tier};
 pub use value::{Node, Provenance, Span, Value};
