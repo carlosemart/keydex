@@ -31,16 +31,19 @@ def split_profiles(raw: str) -> list[str]:
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
-def load(profiles: list[str]) -> App:
+def environment(profiles: list[str]) -> keydex.Environment:
     secret_root = os.environ.get("APP_SECRET_ROOT")
-    return keydex.load(
-        App,
+    return keydex.Environment(
         files=[str(CONFIG_DIR / "app.yaml")],
         env_prefix="APP_",
         profiles=profiles,
         secret_files=secret_root is not None,
         secret_root=secret_root,
     )
+
+
+def load(profiles: list[str]) -> App:
+    return environment(profiles).load(App)
 
 
 def render(app: App) -> str:
@@ -70,16 +73,11 @@ def main(argv: list[str] | None = None) -> int:
 
     profiles = split_profiles(args.profiles)
 
+    env = environment(profiles)
+
     if args.explain:
-        secret_root = os.environ.get("APP_SECRET_ROOT")
-        settings = keydex.load_settings(
-            files=[str(CONFIG_DIR / "app.yaml")],
-            env_prefix="APP_",
-            profiles=profiles,
-            secret_files=secret_root is not None,
-            secret_root=secret_root,
-        )
-        explanation = settings.explain(args.explain)
+        env.load(App)
+        explanation = env.explain(args.explain)
         if explanation is None:
             print(f"unknown key: {args.explain}", file=sys.stderr)
             return 2
@@ -87,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        app = load(profiles)
+        app = env.load(App)
     except keydex.ValidationError as error:
         print("invalid configuration:", file=sys.stderr)
         for item in error.errors:

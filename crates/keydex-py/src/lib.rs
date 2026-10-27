@@ -35,6 +35,10 @@ struct Spec {
     env_prefix: String,
     env: BTreeMap<String, String>,
     sensitive: Vec<String>,
+    /// Schema IR when the caller asked for a typed load; `None` in dictionary mode.
+    schema: Option<String>,
+    /// Unknown-key policy, kept so `refresh()` applies the same one.
+    on_unknown: String,
 }
 
 /// Resolved configuration, immutable and queryable by key.
@@ -122,7 +126,28 @@ impl PySettings {
     /// If anything fails the current snapshot is kept: configuration is never left half
     /// applied.
     fn refresh(&self) -> PyResult<()> {
-        let snapshot = build_snapshot(&self.spec)?;
+        let (snapshot, schema) = build_snapshot(&self.spec)?;
+        if let Some(schema) = schema {
+            if let Err(errors) = coerce(&snapshot, &schema) {
+                let summary = errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return Err(KeydexError::new_err(summary));
+            }
+            if self.spec.on_unknown == "error" {
+                let unknown = unknown_keys(&snapshot, &schema);
+                if !unknown.is_empty() {
+                    let summary = unknown
+                        .iter()
+                        .map(|item| format!("{}: unknown key", item.path))
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    return Err(KeydexError::new_err(summary));
+                }
+            }
+        }
         let mut guard = self
             .inner
             .write()
@@ -157,8 +182,10 @@ fn load(
             None => std::env::vars().collect(),
         },
         sensitive,
+        schema: None,
+        on_unknown: String::from("warn"),
     };
-    let snapshot = build_snapshot(&spec)?;
+    let (snapshot, _) = build_snapshot(&spec)?;
     Ok(PySettings {
         spec,
         inner: Arc::new(RwLock::new(Arc::new(snapshot))),
@@ -166,11 +193,11 @@ fn load(
 }
 
 #[pyfunction]
-#[pyo3(signature = (ir, files, env_prefix = "", env = None, profiles = Vec::new(), on_unknown = "warn"))]
-/// Loads with a schema: relaxed binding, coercion and validation.
+#[pyo3(signature = (ir, files, env_prefix = "", env = None, profiles = Vec::new(), on_unknown = "warn", sensitive = Vec::new()))]
+/// Loads with a schema in a single build: the typed tree and the settings share one
+/// snapshot, so `explain` describes exactly what the model was built from.
 ///
-/// Returns `(errors, warnings, tree)`. The Python layer decides which exception to
-/// raise; the engine does not know about Python exception classes.
+/// Returns `(settings, errors, warnings, tree)`.
 fn load_typed(
     py: Python<'_>,
     ir: &str,
@@ -179,8 +206,8 @@ fn load_typed(
     env: Option<HashMap<String, String>>,
     profiles: Vec<String>,
     on_unknown: &str,
-) -> PyResult<(Vec<Py<PyAny>>, Vec<Py<PyAny>>, Py<PyAny>)> {
-    let schema = Schema::from_json(ir).map_err(to_py_err)?;
+    sensitive: Vec<String>,
+) -> PyResult<(PySettings, Vec<Py<PyAny>>, Vec<Py<PyAny>>, Py<PyAny>)> {
     let spec = Spec {
         files,
         profiles,
@@ -189,16 +216,15 @@ fn load_typed(
             Some(map) => map.into_iter().collect(),
             None => std::env::vars().collect(),
         },
-        sensitive: Vec::new(),
+        sensitive,
+        schema: Some(ir.to_string()),
+        on_unknown: on_unknown.to_string(),
     };
 
-    let mut builder = Builder::new().with_env(spec.env.clone());
-    builder
-        .schema_env_source(&schema, &spec.env_prefix, Tier::Environment)
-        .map_err(to_py_err)?;
-    add_documents(&mut builder, &spec)?;
-
-    let snapshot = builder.build().map_err(to_py_err)?;
+    let (snapshot, schema) = build_snapshot(&spec)?;
+    let Some(schema) = schema else {
+        return Err(KeydexError::new_err("the typed path requires a schema"));
+    };
 
     let coerced = coerce(&snapshot, &schema);
     let unknown = unknown_keys(&snapshot, &schema);
@@ -237,21 +263,43 @@ fn load_typed(
         }
     };
 
+    let settings = PySettings {
+        spec,
+        inner: Arc::new(RwLock::new(Arc::new(snapshot))),
+    };
+
     Ok((
+        settings,
         errors_to_py(py, &errors)?,
         pairs_to_py(py, &warnings)?,
         payload,
     ))
 }
 
-fn build_snapshot(spec: &Spec) -> PyResult<Snapshot> {
+fn build_snapshot(spec: &Spec) -> PyResult<(Snapshot, Option<Schema>)> {
     let mut builder = Builder::new().with_env(spec.env.clone());
-    builder.env_source(&spec.env_prefix, Tier::Environment);
+
+    let schema = match &spec.schema {
+        Some(ir) => {
+            let schema = Schema::from_json(ir).map_err(to_py_err)?;
+            builder
+                .schema_env_source(&schema, &spec.env_prefix, Tier::Environment)
+                .map_err(to_py_err)?;
+            Some(schema)
+        }
+        None => {
+            builder.env_source(&spec.env_prefix, Tier::Environment);
+            None
+        }
+    };
+
     add_documents(&mut builder, spec)?;
     for key in &spec.sensitive {
         builder.mark_sensitive(key);
     }
-    builder.build().map_err(to_py_err)
+
+    let snapshot = builder.build().map_err(to_py_err)?;
+    Ok((snapshot, schema))
 }
 
 /// Adds the base files and, after them, those of every active profile.

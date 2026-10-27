@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import warnings as _warnings
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TypeVar
 
@@ -23,6 +24,7 @@ from keydex._keydex import (
 from keydex._secrets import Secret
 
 __all__ = [
+    "Environment",
     "KeydexError",
     "Secret",
     "Settings",
@@ -48,13 +50,110 @@ class ValidationError(KeydexError):
     """The snapshot does not satisfy the model schema.
 
     Attributes:
-        errors: One dictionary per problem, with `path` and `message` keys.
+        errors: One dictionary per problem, with `path`, `message` and, when the value
+            came from a file, `file`, `line` and `col`.
     """
 
     def __init__(self, errors: list[dict[str, str]]) -> None:
         self.errors = errors
         summary = "; ".join(f"{error['path']}: {error['message']}" for error in errors)
         super().__init__(summary or "validation failed")
+
+
+class Environment:
+    """One build, two views.
+
+    `load(model)` returns the typed model; the same snapshot is kept for `explain`,
+    `settings()` and `refresh()`, so provenance describes exactly what the model was built
+    from without loading the configuration twice.
+
+    Args:
+        files: Configuration files, in application order.
+        env_prefix: Prefix stripped from environment variables.
+        env: Environment to use. Defaults to `os.environ`.
+        profiles: Active profiles, applied as ``<name>-<profile>.<ext>``.
+        on_unknown: `"warn"`, `"error"` or `"ignore"` for keys the schema does not use.
+        sensitive: Extra keys hidden from `explain`, `items` and `dump`.
+        secret_files: Resolve `*_FILE` variables by reading the referenced files.
+        secret_root: Directory that resolved `*_FILE` paths must stay inside.
+    """
+
+    def __init__(
+        self,
+        *,
+        files: Sequence[str] = (),
+        env_prefix: str = "",
+        env: dict[str, str] | None = None,
+        profiles: Sequence[str] = (),
+        on_unknown: str = "warn",
+        sensitive: Sequence[str] = (),
+        secret_files: bool = False,
+        secret_root: str | os.PathLike[str] | None = None,
+    ) -> None:
+        self._files = list(files)
+        self._env_prefix = env_prefix
+        self._env = env
+        self._profiles = list(profiles)
+        self._on_unknown = on_unknown
+        self._sensitive = list(sensitive)
+        self._secret_files = secret_files
+        self._secret_root = secret_root
+        self._settings: Settings | None = None
+
+    def load(self, model: type[T]) -> T:
+        """Builds the configuration and returns the typed model.
+
+        Raises:
+            ValidationError: The configuration does not satisfy the model schema.
+            KeydexError: A file cannot be read or the engine fails.
+        """
+        source, derived = _environment(
+            self._env,
+            self._env_prefix,
+            secret_files=self._secret_files,
+            secret_root=self._secret_root,
+        )
+        ir = json.dumps(_schema.build_ir(model), separators=(",", ":"))
+        settings, errors, unknown, tree = _load_typed(
+            ir,
+            self._files,
+            self._env_prefix,
+            source,
+            self._profiles,
+            self._on_unknown,
+            self._sensitive + derived,
+        )
+        if errors:
+            raise ValidationError(errors)
+        for item in unknown:
+            _warnings.warn(
+                f"{item['path']}: {item['message']}",
+                UnknownKeyWarning,
+                stacklevel=2,
+            )
+        self._settings = settings
+        return _schema.build(model, tree)  # type: ignore[return-value]
+
+    def explain(self, key: str, *, reveal: bool = False) -> dict[str, object] | None:
+        """Provenance of a key in the snapshot used by the last `load`."""
+        return self._require().explain(key, reveal=reveal)
+
+    def settings(self) -> Settings:
+        """The dictionary view of the same snapshot."""
+        return self._require()
+
+    def refresh(self) -> None:
+        """Re-reads the sources and validates them.
+
+        A typed model already returned by `load` is a copy: call `load(model)` again to get
+        an updated one.
+        """
+        self._require().refresh()
+
+    def _require(self) -> Settings:
+        if self._settings is None:
+            raise KeydexError("call load() before using the environment")
+        return self._settings
 
 
 def load(
@@ -65,56 +164,43 @@ def load(
     env: dict[str, str] | None = None,
     profiles: tuple[str, ...] | list[str] = (),
     on_unknown: str = "warn",
+    sensitive: tuple[str, ...] | list[str] = (),
     secret_files: bool = False,
     secret_root: str | os.PathLike[str] | None = None,
 ) -> T:
     """Loads the configuration and returns a typed instance of the model.
 
+    A convenience wrapper over :class:`Environment`; use the class when you also need
+    `explain` or `refresh`.
+
     Args:
-        model: Dataclass describing the configuration. Field types drive coercion and
-            fields without a default are required.
+        model: Dataclass describing the configuration.
         files: Configuration files, in application order.
         env_prefix: Prefix stripped from environment variables, for example `"APP_"`.
-        env: Environment to use. Defaults to `os.environ`; tests should inject one
-            instead of mutating the process environment.
-        profiles: Active profiles. `app.yaml` plus `"prod"` applies `app-prod.yaml`.
-        on_unknown: What to do with keys no field uses: `"warn"` (default,
-            :class:`UnknownKeyWarning`), `"error"` (:class:`ValidationError`) or
-            `"ignore"`.
-        secret_files: Resolve `*_FILE` variables by reading the referenced file. Off by
-            default: it turns the environment into a file-read surface.
-        secret_root: Directory that resolved `*_FILE` paths must stay inside. Required
-            when `secret_files` is enabled.
+        env: Environment to use. Defaults to `os.environ`.
+        profiles: Active profiles.
+        on_unknown: `"warn"`, `"error"` or `"ignore"`.
+        sensitive: Extra keys hidden from `explain`, `items` and `dump`.
+        secret_files: Resolve `*_FILE` variables by reading the referenced files.
+        secret_root: Directory that resolved `*_FILE` paths must stay inside.
 
     Returns:
         An instance of ``model``.
 
     Raises:
         ValidationError: The configuration does not satisfy the model schema.
-        KeydexError: A file cannot be read, a `*_FILE` path escapes `secret_root`, or the
-            engine fails.
+        KeydexError: A file cannot be read or the engine fails.
     """
-    environment, _ = _environment(
-        env, env_prefix, secret_files=secret_files, secret_root=secret_root
-    )
-    ir = json.dumps(_schema.build_ir(model), separators=(",", ":"))
-    errors, unknown, tree = _load_typed(
-        ir,
-        list(files),
-        env_prefix,
-        environment,
-        list(profiles),
-        on_unknown,
-    )
-    if errors:
-        raise ValidationError(errors)
-    for item in unknown:
-        _warnings.warn(
-            f"{item['path']}: {item['message']}",
-            UnknownKeyWarning,
-            stacklevel=2,
-        )
-    return _schema.build(model, tree)  # type: ignore[return-value]
+    return Environment(
+        files=files,
+        env_prefix=env_prefix,
+        env=env,
+        profiles=profiles,
+        on_unknown=on_unknown,
+        sensitive=sensitive,
+        secret_files=secret_files,
+        secret_root=secret_root,
+    ).load(model)
 
 
 def load_settings(
@@ -133,22 +219,21 @@ def load_settings(
         files: Configuration files, in application order.
         env_prefix: Prefix stripped from environment variables.
         env: Environment to use. Defaults to `os.environ`.
-        profiles: Active profiles, applied as ``<name>-<profile>.<ext>``.
-        sensitive: Keys hidden from `explain`, `items` and `dump`. Values loaded from a
-            `*_FILE` variable are added automatically.
-        secret_files: Resolve `*_FILE` variables by reading the referenced file.
+        profiles: Active profiles.
+        sensitive: Keys hidden from `explain`, `items` and `dump`.
+        secret_files: Resolve `*_FILE` variables by reading the referenced files.
         secret_root: Directory that resolved `*_FILE` paths must stay inside.
 
     Returns:
         A :class:`Settings` mapping with provenance support.
     """
-    environment, derived = _environment(
+    source, derived = _environment(
         env, env_prefix, secret_files=secret_files, secret_root=secret_root
     )
     return _load_settings(
         list(files),
         env_prefix,
-        environment,
+        source,
         list(profiles),
         list(sensitive) + derived,
     )
@@ -198,9 +283,7 @@ def _environment(
             raise KeydexError(f"{key}: cannot read {reference}: {error}") from error
 
         if not resolved.is_relative_to(root):
-            raise KeydexError(
-                f"{key}: {resolved} is outside secret_root ({root})"
-            )
+            raise KeydexError(f"{key}: {resolved} is outside secret_root ({root})")
 
         try:
             source[key[: -len("_FILE")]] = resolved.read_text(encoding="utf-8").strip()

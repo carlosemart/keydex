@@ -47,6 +47,10 @@ First functional release. `0.0.1` was only a name reservation.
 - Validation errors carry the file, line and column of the offending value, and an invalid
   `Enum`/`Decimal`/`UUID` is now a `ValidationError` instead of a raw Python exception.
 - An `Optional[T]` with a dataclass default keeps that default when the key is absent.
+- `Environment`: one build produces the typed model and the snapshot used by `explain`,
+  `settings()` and `refresh()`; the homelab demo no longer loads the configuration twice.
+  `refresh()` revalidates and keeps the previous snapshot when the new configuration is
+  invalid.
 
 ### Known limitations
 

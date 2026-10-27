@@ -491,6 +491,11 @@ class App:
 
 cfg = keydex.load(App, files=["app.yaml"], env_prefix="APP_", profiles=["prod"])
 cfg.db.host                 # native access, no FFI
+
+env = keydex.Environment(files=["app.yaml"], env_prefix="APP_", profiles=["prod"])
+app = env.load(App)         # same build, snapshot kept
+env.explain("db.host")      # provenance of the snapshot the model came from
+env.refresh()               # re-reads and revalidates
 ```
 
 ```python

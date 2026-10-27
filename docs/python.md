@@ -65,6 +65,24 @@ cfg["a.b"]          # nested: a -> b
 cfg['["a.b"]']      # the literal key "a.b"
 ```
 
+## One build, two views
+
+`keydex.load(...)` is a shortcut: build, validate, return the model. When you also need
+provenance or reloads, use `Environment` so both come from the **same** snapshot instead of
+loading twice:
+
+```python
+env = keydex.Environment(files=["config/app.yaml"], env_prefix="APP_", profiles=["prod"])
+
+app = env.load(App)          # typed model
+env.explain("db.host")       # provenance of the snapshot `app` was built from
+env.settings()               # mapping view of the same snapshot
+env.refresh()                # re-reads and revalidates; raises if the config is invalid
+```
+
+A typed model is a copy: after `refresh()` call `env.load(App)` again to get an updated one.
+If `refresh()` fails, the previous snapshot keeps serving.
+
 ## Environment binding
 
 With a model, the schema disambiguates, so you do not need double underscores:
@@ -115,8 +133,8 @@ Precedence, as implemented: **environment (2) > profile file (3) > base file (4)
 defaults coming from the dataclass. The other bands in the specification (CLI arguments,
 test overrides, schema defaults) are design, not code.
 
-`explain` exists on `Settings`, not on a typed model: `load` returns your dataclass. If you
-need provenance, load in dictionary mode with the same arguments.
+`explain` exists on `Settings` and on `Environment`. A bare typed model has no provenance:
+it is a dataclass.
 
 ## Profiles
 
@@ -238,7 +256,9 @@ usage errors). Useful in scripts and containers.
 
 | Call | Purpose |
 |---|---|
-| `keydex.load(Model, *, files, env_prefix, env, profiles, on_unknown, secret_files, secret_root)` | typed load |
+| `keydex.load(Model, *, files, env_prefix, env, profiles, on_unknown, sensitive, secret_files, secret_root)` | typed load (shortcut) |
+| `keydex.Environment(...).load(Model)` | typed load, keeping the snapshot for provenance |
+| `Environment.explain / settings / refresh` | provenance, mapping view, reload |
 | `keydex.load_settings(files, env_prefix, env, profiles, *, sensitive, secret_files, secret_root)` | dictionary mode |
 | `Settings.get / [] / in / len / keys / items / explain / refresh` | dictionary access |
 | `keydex.Secret` | redacted sensitive value |
@@ -255,6 +275,5 @@ instead of mutating `os.environ`.
 - Remote sources (Vault, S3, Consul) and `watch()`.
 - `pydantic`, `attrs` and `msgspec` models (dataclasses only for now).
 - Validation ranges, regex or custom validators.
-- `explain`/`dump`/`refresh` on a typed model.
 
 See [the specification](spec.md) for the agreed design of each one.
