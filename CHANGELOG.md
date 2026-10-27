@@ -41,6 +41,12 @@ First functional release. `0.0.1` was only a name reservation.
 - Sensitivity is a property of the node: it survives the merge, propagates through
   interpolation (a value built from a secret is redacted too), and drives redaction in
   `explain`, `items`, `dump` and the CLI.
+- The Schema IR is a validated type (`enum`, `path`, `decimal`, `uuid`, `secret`), so the
+  engine checks enum membership, decimal and UUID lexemes, and rejects a structurally
+  invalid IR at parse time instead of returning `null`.
+- Validation errors carry the file, line and column of the offending value, and an invalid
+  `Enum`/`Decimal`/`UUID` is now a `ValidationError` instead of a raw Python exception.
+- An `Optional[T]` with a dataclass default keeps that default when the key is absent.
 
 ### Known limitations
 

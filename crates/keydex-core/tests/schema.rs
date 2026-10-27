@@ -278,3 +278,100 @@ fn nested_keys_inside_lists_are_known() {
 
     assert!(keydex_core::unknown_keys(&snapshot, &schema).is_empty());
 }
+
+fn load_ir(ir: &str, yaml: &str) -> Result<serde_json::Value, Vec<keydex_core::ValidationError>> {
+    let schema = Schema::from_json(ir).unwrap();
+    let mut builder = Builder::new().with_env(env(&[]));
+    builder
+        .schema_env_source(&schema, "APP_", Tier::Environment)
+        .unwrap();
+    builder
+        .document("app.yaml", yaml, Format::Yaml, Tier::BaseFile)
+        .unwrap();
+    let snapshot = builder.build().unwrap();
+    coerce(&snapshot, &schema)
+}
+
+const RICH_IR: &str = r#"{
+  "ir": "keydex.schema/v1",
+  "root": {"type":"struct","required":true,"fields":{
+    "mode": {"type":"enum","variants":["fast","slow"],"required":true},
+    "price": {"type":"decimal","required":false},
+    "id": {"type":"uuid","required":false},
+    "note": {"type":"optional","has_default":true,"required":false,"inner":{"type":"str"}}
+  }}
+}"#;
+
+#[test]
+fn enum_matching_is_case_insensitive_and_canonical() {
+    let tree = load_ir(RICH_IR, "mode: SLOW\n").unwrap();
+    assert_eq!(tree["mode"], json!("slow"));
+}
+
+#[test]
+fn an_unknown_enum_value_is_a_validation_error() {
+    let errors = load_ir(RICH_IR, "mode: turbo\n").unwrap_err();
+    assert_eq!(errors[0].path, "mode");
+    assert!(errors[0].message.contains("expected one of"), "{errors:?}");
+}
+
+#[test]
+fn decimals_are_validated_as_text() {
+    let tree = load_ir(RICH_IR, "mode: fast\nprice: \"1.10\"\n").unwrap();
+    assert_eq!(tree["price"], json!("1.10"));
+
+    let errors = load_ir(RICH_IR, "mode: fast\nprice: \"many\"\n").unwrap_err();
+    assert!(errors[0].message.contains("decimal"), "{errors:?}");
+}
+
+#[test]
+fn a_decimal_from_a_yaml_number_is_rejected_to_keep_precision() {
+    let errors = load_ir(RICH_IR, "mode: fast\nprice: 1.10\n").unwrap_err();
+    assert!(errors[0].message.contains("as text"), "{errors:?}");
+}
+
+#[test]
+fn uuids_are_validated() {
+    let tree = load_ir(
+        RICH_IR,
+        "mode: fast\nid: 550E8400-E29B-41D4-A716-446655440000\n",
+    )
+    .unwrap();
+    assert_eq!(tree["id"], json!("550e8400-e29b-41d4-a716-446655440000"));
+
+    let errors = load_ir(RICH_IR, "mode: fast\nid: nope\n").unwrap_err();
+    assert!(errors[0].message.contains("UUID"), "{errors:?}");
+}
+
+#[test]
+fn an_optional_with_a_default_is_omitted_when_missing() {
+    let tree = load_ir(RICH_IR, "mode: fast\n").unwrap();
+    assert!(tree.get("note").is_none(), "{tree}");
+}
+
+#[test]
+fn validation_errors_carry_the_span() {
+    let ir = r#"{
+      "ir": "keydex.schema/v1",
+      "root": {"type":"struct","required":true,"fields":{
+        "port": {"type":"int","required":true}
+      }}
+    }"#;
+    let errors = load_ir(ir, "port: many\n").unwrap_err();
+    let span = errors[0].span.as_ref().expect("span");
+    assert_eq!(span.file, "app.yaml");
+    assert_eq!(span.line, 1);
+}
+
+#[test]
+fn a_structurally_invalid_ir_is_rejected_at_parse_time() {
+    let error =
+        Schema::from_json(r#"{"ir":"keydex.schema/v1","root":{"type":"str"}}"#).unwrap_err();
+    assert!(matches!(error, keydex_core::Error::InvalidSchema { .. }));
+
+    let error = Schema::from_json(
+        r#"{"ir":"keydex.schema/v1","root":{"type":"struct","fields":{"m":{"type":"enum","variants":[]}}}}"#,
+    )
+    .unwrap_err();
+    assert!(matches!(error, keydex_core::Error::InvalidSchema { .. }));
+}

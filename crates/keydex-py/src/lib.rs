@@ -16,8 +16,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use keydex_core::{
-    Builder, Error, Explanation, Format, Provenance, Schema, Snapshot, Tier, Value, coerce,
-    unknown_keys,
+    Builder, Error, Explanation, Format, Provenance, Schema, Snapshot, Tier, ValidationError,
+    Value, coerce, unknown_keys,
 };
 use pyo3::IntoPyObjectExt;
 use pyo3::create_exception;
@@ -203,7 +203,7 @@ fn load_typed(
     let coerced = coerce(&snapshot, &schema);
     let unknown = unknown_keys(&snapshot, &schema);
 
-    let mut errors: Vec<(String, String)> = Vec::new();
+    let mut errors: Vec<ValidationError> = Vec::new();
     let mut warnings: Vec<(String, String)> = Vec::new();
 
     let payload = match coerced {
@@ -217,7 +217,11 @@ fn load_typed(
                 };
                 match on_unknown {
                     "ignore" => {}
-                    "error" => errors.push((item.path, message)),
+                    "error" => errors.push(ValidationError {
+                        path: item.path,
+                        message,
+                        span: item.span,
+                    }),
                     _ => warnings.push((item.path, message)),
                 }
             }
@@ -228,13 +232,13 @@ fn load_typed(
             }
         }
         Err(list) => {
-            errors.extend(list.into_iter().map(|error| (error.path, error.message)));
+            errors.extend(list);
             py.None()
         }
     };
 
     Ok((
-        pairs_to_py(py, &errors)?,
+        errors_to_py(py, &errors)?,
         pairs_to_py(py, &warnings)?,
         payload,
     ))
@@ -353,6 +357,30 @@ fn json_to_py(py: Python<'_>, value: &serde_json::Value) -> PyResult<Py<PyAny>> 
 
 fn to_py_err(error: Error) -> PyErr {
     KeydexError::new_err(error.to_string())
+}
+
+fn errors_to_py(py: Python<'_>, errors: &[ValidationError]) -> PyResult<Vec<Py<PyAny>>> {
+    errors
+        .iter()
+        .map(|error| {
+            let dict = PyDict::new(py);
+            dict.set_item("path", &error.path)?;
+            dict.set_item("message", &error.message)?;
+            match error.span.as_ref() {
+                Some(span) => {
+                    dict.set_item("file", &span.file)?;
+                    dict.set_item("line", span.line)?;
+                    dict.set_item("col", span.col)?;
+                }
+                None => {
+                    dict.set_item("file", py.None())?;
+                    dict.set_item("line", py.None())?;
+                    dict.set_item("col", py.None())?;
+                }
+            }
+            Ok(dict.into_any().unbind())
+        })
+        .collect()
 }
 
 fn pairs_to_py(py: Python<'_>, pairs: &[(String, String)]) -> PyResult<Vec<Py<PyAny>>> {

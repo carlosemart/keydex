@@ -214,14 +214,16 @@ dataclasses, `Enum`, `Path`, `Decimal`, `UUID`, `Secret[T]`.
 
 ### 7.2 Coercion rules
 
-| Type | Accepts (`relaxed` mode) | Caveat |
+| Type | Accepts (`relaxed` mode) | Notes |
 |---|---|---|
-| `bool` | `true/false`, `yes/no`, `on/off`, `"1"/"0"` as **text** | A YAML/TOML/JSON integer `1` is rejected, not coerced |
+| `bool` | `true/false`, `yes/no`, `on/off`, `"1"/"0"` as **text** | A YAML/TOML/JSON integer `1` is rejected |
 | `int` | `42`, `"42"` | |
 | `float` | `3.14`, `"3.14"`, integers | |
-| `Enum` | exact member value | Case-insensitive matching is **not** implemented; an invalid value raises `ValueError` from Python, not `ValidationError` |
-| `Path` | `str`; `~` is **not** expanded | |
-| `Decimal` | exact `str` | Sourced from a YAML/JSON number it goes through the text form and can lose precision (`1.10` → `1.1`) |
+| `Enum` | member value, case-insensitive | Validated in the engine; returns the canonical variant |
+| `Path` | non-empty `str` | `~` is **not** expanded |
+| `Decimal` | decimal text (`"1.10"`) | A YAML/JSON number is rejected so precision cannot be lost |
+| `UUID` | canonical or uppercase `str` | Normalised to lowercase |
+| `Secret[T]` | inner type `T` | Validated like `T`; the caller wraps it |
 | `datetime` | ISO-8601 | *Planned* |
 | `duration` | `250ms`, `5s`, `3m`, `2h`, `1d`, `PT5M` | *Planned* |
 | `size` | `10MB`, `1GiB` (binary vs decimal explicit) | *Planned* |
@@ -360,10 +362,10 @@ stable across releases.
 }
 ```
 
-Types in v1: `str`, `int`, `float`, `bool`, `any`, `struct`, `optional`, `list`. The engine
-is language neutral: it knows nothing about host language types. Rich conversions
-(`Enum`, `Path`, `Decimal`, `UUID`, `Secret`) are applied by the calling layer after
-coercion, based on its own type information.
+Types in v1: `str`, `int`, `float`, `bool`, `any`, `path`, `decimal`, `uuid`,
+`enum` (with `variants`), `secret` (with `inner`), `optional`, `list` and `struct`. The
+engine validates every one of them and reports errors with the path and the document
+position; the calling layer only constructs its own types afterwards.
 
 Evolution rules:
 

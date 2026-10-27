@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from enum import Enum
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -173,3 +175,76 @@ def test_on_unknown_ignore_does_not_warn(tmp_path: Path) -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         keydex.load(App, files=[path], env_prefix="APP_", env={}, on_unknown="ignore")
+
+
+def test_an_invalid_enum_is_a_validation_error(tmp_path: Path) -> None:
+    path = write(tmp_path, "mode: turbo\ndata_dir: /tmp\n")
+    with pytest.raises(keydex.ValidationError) as info:
+        keydex.load(WithRich, files=[path], env_prefix="APP_", env={})
+
+    assert info.value.errors[0]["path"] == "mode"
+    assert "expected one of" in info.value.errors[0]["message"]
+
+
+def test_an_enum_matches_case_insensitively(tmp_path: Path) -> None:
+    path = write(tmp_path, "mode: SLOW\ndata_dir: /tmp\n")
+    cfg = keydex.load(WithRich, files=[path], env_prefix="APP_", env={})
+    assert cfg.mode is Mode.SLOW
+
+
+def test_decimal_keeps_its_precision(tmp_path: Path) -> None:
+    @dataclass(frozen=True)
+    class Money:
+        price: Decimal
+
+    path = write(tmp_path, 'price: "1.10"\n')
+    cfg = keydex.load(Money, files=[path], env_prefix="APP_", env={})
+    assert cfg.price == Decimal("1.10")
+    assert str(cfg.price) == "1.10"
+
+
+def test_a_decimal_from_a_yaml_number_is_rejected(tmp_path: Path) -> None:
+    @dataclass(frozen=True)
+    class Money:
+        price: Decimal
+
+    path = write(tmp_path, "price: 1.10\n")
+    with pytest.raises(keydex.ValidationError) as info:
+        keydex.load(Money, files=[path], env_prefix="APP_", env={})
+    assert "as text" in info.value.errors[0]["message"]
+
+
+def test_a_uuid_is_validated(tmp_path: Path) -> None:
+    @dataclass(frozen=True)
+    class WithId:
+        id: UUID
+
+    good = write(tmp_path, "id: 550E8400-E29B-41D4-A716-446655440000\n")
+    assert keydex.load(WithId, files=[good], env_prefix="APP_", env={}).id == UUID(
+        "550e8400-e29b-41d4-a716-446655440000"
+    )
+
+    bad = write(tmp_path, "id: nope\n")
+    with pytest.raises(keydex.ValidationError) as info:
+        keydex.load(WithId, files=[bad], env_prefix="APP_", env={})
+    assert "UUID" in info.value.errors[0]["message"]
+
+
+def test_an_optional_default_is_respected(tmp_path: Path) -> None:
+    @dataclass(frozen=True)
+    class WithDefault:
+        note: str | None = "keep-me"
+
+    cfg = keydex.load(WithDefault, files=[write(tmp_path, "")], env_prefix="APP_", env={})
+    assert cfg.note == "keep-me"
+
+
+def test_validation_errors_carry_the_position(tmp_path: Path) -> None:
+    path = write(tmp_path, "db:\n  host: h\n  port: many\n")
+    with pytest.raises(keydex.ValidationError) as info:
+        keydex.load(App, files=[path], env_prefix="APP_", env={})
+
+    error = info.value.errors[0]
+    assert error["path"] == "db.port"
+    assert error["file"] == path
+    assert error["line"] == 3

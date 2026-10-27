@@ -51,6 +51,13 @@ pub enum Error {
         expected: String,
     },
 
+    /// The IR is structurally invalid.
+    #[error("invalid schema: {message}")]
+    InvalidSchema {
+        /// What is wrong.
+        message: String,
+    },
+
     /// A `${...}` reference points to a key that does not exist.
     #[error("missing reference: {reference} (used in {path})")]
     MissingReference {

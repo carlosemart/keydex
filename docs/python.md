@@ -46,10 +46,11 @@ Known gaps in the type layer, so they do not surprise you:
 | Case | What happens today |
 |---|---|
 | `bool` from a YAML/JSON number (`debug: 1`) | rejected: only the text `"1"`/`"0"` is accepted |
-| `Enum` with a wrong value or wrong case | raises `ValueError` from Python, not `ValidationError` |
-| `Decimal` from a YAML/JSON number | goes through text and can lose precision (`1.10` → `1.1`) |
-| `Secret[T]` with `T != str` | raises `TypeError` at load time |
-| `Optional[T]` with a dataclass default | the default is not applied: the field becomes `None` |
+| `Decimal` written as a YAML/JSON number | rejected: write it as text (`price: "1.10"`) so precision is kept |
+
+Everything else is validated in the engine and reported as `ValidationError` with the path
+and the file position: `Enum` values (case-insensitive, canonicalised), `Decimal` and `UUID`
+lexemes, paths, required fields and lists.
 
 ## Lists, maps and precedence
 

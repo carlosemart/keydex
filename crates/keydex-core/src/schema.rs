@@ -5,8 +5,8 @@
 //! the package (see ADR 0004).
 //!
 //! The engine is language neutral: it knows nothing about the types of any particular
-//! host language. Rich conversions (`enum`, `path`, `decimal`, `uuid`) are applied by the
-//! caller after coercion.
+//! host language. Rich types (`enum`, `path`, `decimal`, `uuid`, `secret`) are validated
+//! here and constructed by the caller.
 
 use std::collections::BTreeMap;
 
@@ -16,7 +16,7 @@ use serde_json::{Map, Value as Json};
 use crate::error::{Error, Result};
 use crate::snapshot::Snapshot;
 use crate::source::Path;
-use crate::value::{Node, Value};
+use crate::value::{Node, Span, Value};
 
 /// Version of the IR understood by this engine.
 pub const IR_VERSION: &str = "keydex.schema/v1";
@@ -43,31 +43,101 @@ impl Schema {
                 expected: IR_VERSION.to_string(),
             });
         }
+        schema.validate()?;
         Ok(schema)
     }
+
+    /// Rejects an IR that is structurally wrong, instead of failing at load time.
+    pub fn validate(&self) -> Result<()> {
+        if !matches!(self.root.kind, FieldType::Struct { .. }) {
+            return Err(Error::InvalidSchema {
+                message: String::from("the root field must be a struct"),
+            });
+        }
+        walk(&self.root, "root")
+    }
+}
+
+fn walk(field: &Field, path: &str) -> Result<()> {
+    match &field.kind {
+        FieldType::Struct { fields } => {
+            for (name, child) in fields {
+                walk(child, &format!("{path}.{name}"))?;
+            }
+        }
+        FieldType::List { items } => walk(items, &format!("{path}[]"))?,
+        FieldType::Optional { inner } | FieldType::Secret { inner } => {
+            walk(inner, &format!("{path}?"))?;
+        }
+        FieldType::Enum { variants } if variants.is_empty() => {
+            return Err(Error::InvalidSchema {
+                message: format!("{path}: enum without variants"),
+            });
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// Schema node.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Field {
-    /// Type: `str`, `int`, `float`, `bool`, `any`, `struct`, `optional` or `list`.
-    #[serde(rename = "type")]
-    pub kind: String,
+    /// The type itself.
+    #[serde(flatten)]
+    pub kind: FieldType,
     /// `true` when the value must exist.
     #[serde(default)]
     pub required: bool,
-    /// Default declared in the model (informative; the engine does not apply it).
+    /// `true` when the model declares a default for this field.
     #[serde(default)]
-    pub default: Option<Json>,
-    /// Fields of the `struct`.
-    #[serde(default)]
-    pub fields: BTreeMap<String, Field>,
-    /// Element of a `list`.
-    #[serde(default)]
-    pub items: Option<Box<Field>>,
-    /// Inner type of an `optional`.
-    #[serde(default)]
-    pub inner: Option<Box<Field>>,
+    pub has_default: bool,
+}
+
+/// Type of a schema node.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FieldType {
+    /// Text.
+    Str,
+    /// Integer.
+    Int,
+    /// Floating point.
+    Float,
+    /// Boolean.
+    Bool,
+    /// Any scalar, passed through without conversion.
+    Any,
+    /// Filesystem path.
+    Path,
+    /// Exact decimal number, carried as text.
+    Decimal,
+    /// UUID.
+    Uuid,
+    /// One of a closed set of string values.
+    Enum {
+        /// Accepted values, compared case-insensitively.
+        variants: Vec<String>,
+    },
+    /// Sensitive value; the caller wraps it.
+    Secret {
+        /// Inner type.
+        inner: Box<Field>,
+    },
+    /// Absent or explicit `null`.
+    Optional {
+        /// Inner type.
+        inner: Box<Field>,
+    },
+    /// Sequence, replaced whole by higher-priority sources.
+    List {
+        /// Element type.
+        items: Box<Field>,
+    },
+    /// Object, merged key by key.
+    Struct {
+        /// Fields by name.
+        fields: BTreeMap<String, Field>,
+    },
 }
 
 /// Validation error for a specific value.
@@ -77,11 +147,20 @@ pub struct ValidationError {
     pub path: String,
     /// What is wrong.
     pub message: String,
+    /// Position in the document, when known.
+    pub span: Option<Span>,
 }
 
 impl std::fmt::Display for ValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.path, self.message)
+        match &self.span {
+            Some(span) => write!(
+                f,
+                "{}:{}: {}: {}",
+                span.file, span.line, self.path, self.message
+            ),
+            None => write!(f, "{}: {}", self.path, self.message),
+        }
     }
 }
 
@@ -92,12 +171,11 @@ pub struct UnknownKey {
     pub path: String,
     /// Closest schema path, when there is one reasonably near.
     pub suggestion: Option<String>,
+    /// Position in the document, when known.
+    pub span: Option<Span>,
 }
 
 /// Returns the snapshot keys that no schema path recognises.
-///
-/// It is the safety net against the quietest failure of a migration: a misspelled
-/// override that never applies.
 #[must_use]
 pub fn unknown_keys(snapshot: &Snapshot, schema: &Schema) -> Vec<UnknownKey> {
     let mut known = Vec::new();
@@ -125,14 +203,14 @@ fn walk_unknown(
         return;
     };
 
-    match field.kind.as_str() {
-        "struct" => {
+    match &field.kind {
+        FieldType::Struct { fields } => {
             let Value::Map(entries) = &node.value else {
                 return;
             };
             for (key, child) in entries {
                 let child_path = path.clone().with_key(key.as_str());
-                match field.fields.get(key) {
+                match fields.get(key) {
                     Some(child_field) => {
                         walk_unknown(child_field, Some(child), &child_path, known, out);
                     }
@@ -140,29 +218,55 @@ fn walk_unknown(
                 }
             }
         }
-        "list" => {
-            let (Value::Seq(items), Some(item_field)) = (&node.value, field.items.as_deref())
-            else {
+        FieldType::List { items } => {
+            let Value::Seq(entries) = &node.value else {
                 return;
             };
-            for (index, child) in items.iter().enumerate() {
-                let child_path = path.clone().with_index(index);
-                walk_unknown(item_field, Some(child), &child_path, known, out);
+            for (index, child) in entries.iter().enumerate() {
+                walk_unknown(
+                    items,
+                    Some(child),
+                    &path.clone().with_index(index),
+                    known,
+                    out,
+                );
             }
         }
-        "optional" => {
-            if let Some(inner) = field.inner.as_deref() {
-                walk_unknown(inner, Some(node), path, known, out);
-            }
+        FieldType::Optional { inner } | FieldType::Secret { inner } => {
+            walk_unknown(inner, Some(node), path, known, out);
         }
         _ => {}
     }
 }
 
+/// Reports an unused subtree: leaves get their own entry so the suggestion is precise.
+fn report_unknown(node: &Node, path: &Path, known: &[String], out: &mut Vec<UnknownKey>) {
+    match &node.value {
+        Value::Map(entries) if !entries.is_empty() => {
+            for (key, child) in entries {
+                report_unknown(child, &path.clone().with_key(key.as_str()), known, out);
+            }
+        }
+        Value::Seq(items) if !items.is_empty() => {
+            for (index, child) in items.iter().enumerate() {
+                report_unknown(child, &path.clone().with_index(index), known, out);
+            }
+        }
+        _ => {
+            let rendered = path.to_string();
+            out.push(UnknownKey {
+                suggestion: best_suggestion(&rendered, known),
+                path: rendered,
+                span: node.effective_span().cloned(),
+            });
+        }
+    }
+}
+
 fn collect_leaf_paths(node: &Field, path: &str, out: &mut Vec<String>) {
-    match node.kind.as_str() {
-        "struct" => {
-            for (name, child) in &node.fields {
+    match &node.kind {
+        FieldType::Struct { fields } => {
+            for (name, child) in fields {
                 let child_path = if path.is_empty() {
                     name.clone()
                 } else {
@@ -171,15 +275,9 @@ fn collect_leaf_paths(node: &Field, path: &str, out: &mut Vec<String>) {
                 collect_leaf_paths(child, &child_path, out);
             }
         }
-        "list" => {
-            if let Some(items) = node.items.as_deref() {
-                collect_leaf_paths(items, path, out);
-            }
-        }
-        "optional" => {
-            if let Some(inner) = node.inner.as_deref() {
-                collect_leaf_paths(inner, path, out);
-            }
+        FieldType::List { items } => collect_leaf_paths(items, path, out),
+        FieldType::Optional { inner } | FieldType::Secret { inner } => {
+            collect_leaf_paths(inner, path, out);
         }
         _ => {
             if !path.is_empty() {
@@ -195,8 +293,6 @@ fn best_suggestion(unknown: &str, known: &[String]) -> Option<String> {
 
     for candidate in known {
         let full = levenshtein(unknown, candidate);
-        // Comparing the last segment too lets us suggest `name` when the user nested it
-        // wrong (`app.name`).
         let last = levenshtein(unknown_last, last_segment(candidate)).saturating_add(1);
         let distance = full.min(last);
         if best.is_none_or(|(current, _)| distance < current) {
@@ -239,9 +335,6 @@ fn levenshtein(a: &str, b: &str) -> usize {
 pub type Coerced = core::result::Result<Json, Vec<ValidationError>>;
 
 /// Coerces and validates the snapshot against the schema.
-///
-/// Returns a JSON tree with the typed values. Missing fields that are not required are
-/// omitted so the caller can apply its own defaults.
 pub fn coerce(snapshot: &Snapshot, schema: &Schema) -> Coerced {
     let mut errors = Vec::new();
     let slot = node(
@@ -281,22 +374,23 @@ fn node(
     path: &Path,
     errors: &mut Vec<ValidationError>,
 ) -> Slot {
-    match field.kind.as_str() {
-        "struct" => {
+    match &field.kind {
+        FieldType::Struct { fields } => {
             let map = match current.map(|node| &node.value) {
                 Some(Value::Map(map)) => Some(map),
                 Some(other) => {
-                    errors.push(ValidationError {
-                        path: path.to_string(),
-                        message: format!("expected an object, got {}", kind_of(other)),
-                    });
+                    errors.push(error(
+                        path,
+                        current,
+                        format!("expected an object, got {}", kind_of(other)),
+                    ));
                     return Slot::Missing;
                 }
                 None => None,
             };
 
             let mut object = Map::new();
-            for (name, child) in &field.fields {
+            for (name, child) in fields {
                 let child_node = map.and_then(|entries| entries.get(name));
                 let child_path = path.clone().with_key(name.as_str());
                 if let Some(value) = node(child, child_node, &child_path, errors).into_option() {
@@ -310,57 +404,51 @@ fn node(
                 Slot::Value(Json::Object(object))
             }
         }
-        "optional" => match current.map(|node| &node.value) {
+        FieldType::Optional { inner } => match current.map(|node| &node.value) {
+            // Absent: let the caller apply its default; otherwise the value is `None`.
+            None if field.has_default => Slot::Missing,
             None | Some(Value::Null) => Slot::Value(Json::Null),
-            _ => match field.inner.as_deref() {
-                Some(inner) => node(inner, current, path, errors),
-                None => {
-                    errors.push(ValidationError {
-                        path: path.to_string(),
-                        message: String::from("optional without inner type"),
-                    });
-                    Slot::Missing
-                }
-            },
+            _ => node(inner, current, path, errors),
         },
-        "list" => {
-            let Some(item) = field.items.as_deref() else {
-                errors.push(ValidationError {
-                    path: path.to_string(),
-                    message: String::from("list without item type"),
-                });
-                return Slot::Missing;
-            };
-
-            match current.map(|node| &node.value) {
-                Some(Value::Seq(items)) => {
-                    let mut values = Vec::with_capacity(items.len());
-                    for (index, child) in items.iter().enumerate() {
-                        let child_path = path.clone().with_index(index);
-                        let slot = node(item, Some(child), &child_path, errors);
-                        values.push(slot.into_option().unwrap_or(Json::Null));
-                    }
-                    Slot::Value(Json::Array(values))
+        FieldType::Secret { inner } => node(inner, current, path, errors),
+        FieldType::List { items } => match current.map(|node| &node.value) {
+            Some(Value::Seq(entries)) => {
+                let mut values = Vec::with_capacity(entries.len());
+                for (index, child) in entries.iter().enumerate() {
+                    let child_path = path.clone().with_index(index);
+                    let slot = node(items, Some(child), &child_path, errors);
+                    values.push(slot.into_option().unwrap_or(Json::Null));
                 }
-                Some(other) => {
+                Slot::Value(Json::Array(values))
+            }
+            Some(other) => {
+                errors.push(error(
+                    path,
+                    current,
+                    format!("expected a list, got {}", kind_of(other)),
+                ));
+                Slot::Missing
+            }
+            None => {
+                if field.required {
                     errors.push(ValidationError {
                         path: path.to_string(),
-                        message: format!("expected a list, got {}", kind_of(other)),
+                        message: String::from("required list missing"),
+                        span: None,
                     });
-                    Slot::Missing
                 }
-                None => {
-                    if field.required {
-                        errors.push(ValidationError {
-                            path: path.to_string(),
-                            message: String::from("required list missing"),
-                        });
-                    }
-                    Slot::Missing
-                }
+                Slot::Missing
             }
-        }
+        },
         _ => scalar(field, current, path, errors),
+    }
+}
+
+fn error(path: &Path, node: Option<&Node>, message: String) -> ValidationError {
+    ValidationError {
+        path: path.to_string(),
+        message,
+        span: node.and_then(|node| node.effective_span().cloned()),
     }
 }
 
@@ -375,29 +463,30 @@ fn scalar(
             errors.push(ValidationError {
                 path: path.to_string(),
                 message: String::from("required field missing"),
+                span: None,
             });
         }
         return Slot::Missing;
     };
 
     if node.value == Value::Null {
-        if field.required {
-            errors.push(ValidationError {
-                path: path.to_string(),
-                message: String::from("required field is null"),
-            });
+        if !matches!(field.kind, FieldType::Any) {
+            if field.required {
+                errors.push(error(
+                    path,
+                    Some(node),
+                    String::from("required field is null"),
+                ));
+            }
             return Slot::Missing;
         }
         return Slot::Value(Json::Null);
     }
 
-    match convert(field, &node.value) {
+    match convert(&field.kind, &node.value) {
         Ok(json) => Slot::Value(json),
         Err(message) => {
-            errors.push(ValidationError {
-                path: path.to_string(),
-                message,
-            });
+            errors.push(error(path, Some(node), message));
             Slot::Missing
         }
     }
@@ -414,10 +503,18 @@ fn kind_of(value: &Value) -> &'static str {
     }
 }
 
-fn convert(field: &Field, value: &Value) -> core::result::Result<Json, String> {
-    match field.kind.as_str() {
-        "str" | "any" => Ok(Json::String(value.to_string())),
-        "int" => match value {
+fn convert(kind: &FieldType, value: &Value) -> core::result::Result<Json, String> {
+    match kind {
+        FieldType::Any => match value {
+            Value::Null => Ok(Json::Null),
+            Value::Bool(b) => Ok(Json::Bool(*b)),
+            Value::Int(i) => Ok(Json::from(*i)),
+            Value::Float(f) => Ok(Json::from(*f)),
+            Value::Str(s) => Ok(Json::String(s.clone())),
+            other => Err(format!("any does not accept {}", kind_of(other))),
+        },
+        FieldType::Str => Ok(Json::String(value.to_string())),
+        FieldType::Int => match value {
             Value::Int(i) => Ok(Json::from(*i)),
             Value::Str(text) => text
                 .parse::<i64>()
@@ -425,7 +522,7 @@ fn convert(field: &Field, value: &Value) -> core::result::Result<Json, String> {
                 .map_err(|_| format!("expected an integer, got {text:?}")),
             other => Err(format!("expected an integer, got {}", kind_of(other))),
         },
-        "float" => match value {
+        FieldType::Float => match value {
             Value::Float(f) => Ok(Json::from(*f)),
             Value::Int(i) => {
                 Ok(serde_json::Number::from_f64(*i as f64).map_or(Json::Null, Json::Number))
@@ -438,14 +535,50 @@ fn convert(field: &Field, value: &Value) -> core::result::Result<Json, String> {
                 .ok_or_else(|| format!("expected a number, got {text:?}")),
             other => Err(format!("expected a number, got {}", kind_of(other))),
         },
-        "bool" => match value {
+        FieldType::Bool => match value {
             Value::Bool(b) => Ok(Json::Bool(*b)),
             Value::Str(text) => parse_bool(text)
                 .map(Json::Bool)
                 .ok_or_else(|| format!("expected a boolean, got {text:?}")),
             other => Err(format!("expected a boolean, got {}", kind_of(other))),
         },
-        other => Err(format!("unknown schema type: {other}")),
+        FieldType::Path => match value {
+            Value::Str(s) if !s.is_empty() => Ok(Json::String(s.clone())),
+            Value::Str(_) => Err(String::from("expected a non-empty path")),
+            other => Err(format!("expected a path, got {}", kind_of(other))),
+        },
+        FieldType::Decimal => match value {
+            Value::Str(s) if is_decimal(s) => Ok(Json::String(s.clone())),
+            Value::Str(s) => Err(format!("expected a decimal number, got {s:?}")),
+            other => Err(format!(
+                "expected a decimal as text (to keep precision), got {}",
+                kind_of(other)
+            )),
+        },
+        FieldType::Uuid => match value {
+            Value::Str(s) if is_uuid(s) => Ok(Json::String(s.to_ascii_lowercase())),
+            Value::Str(s) => Err(format!("expected a UUID, got {s:?}")),
+            other => Err(format!("expected a UUID, got {}", kind_of(other))),
+        },
+        FieldType::Enum { variants } => {
+            let text = value.to_string();
+            variants
+                .iter()
+                .find(|variant| variant.eq_ignore_ascii_case(&text))
+                .cloned()
+                .map(Json::String)
+                .ok_or_else(|| {
+                    format!(
+                        "expected one of {}, got {text:?}",
+                        variants
+                            .iter()
+                            .map(|v| format!("{v:?}"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                })
+        }
+        other => Err(format!("unknown schema type: {other:?}")),
     }
 }
 
@@ -457,12 +590,40 @@ fn parse_bool(text: &str) -> Option<bool> {
     }
 }
 
+fn is_decimal(text: &str) -> bool {
+    let body = text.strip_prefix(['-', '+']).unwrap_or(text);
+    let mut parts = body.split('.');
+    let (Some(integer), fraction) = (parts.next(), parts.next()) else {
+        return false;
+    };
+    if parts.next().is_some() {
+        return false;
+    }
+    let integer_ok = !integer.is_empty() && integer.chars().all(|c| c.is_ascii_digit());
+    let fraction_ok =
+        fraction.is_none_or(|f| !f.is_empty() && f.chars().all(|c| c.is_ascii_digit()));
+    integer_ok && fraction_ok
+}
+
+fn is_uuid(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+    for (i, byte) in bytes.iter().enumerate() {
+        let expected_hyphen = matches!(i, 8 | 13 | 18 | 23);
+        if expected_hyphen {
+            if *byte != b'-' {
+                return false;
+            }
+        } else if !byte.is_ascii_hexdigit() {
+            return false;
+        }
+    }
+    true
+}
+
 /// Matches environment variables against schema paths (relaxed binding).
-///
-/// With a schema there is no guessing: `APP_DB_HOST` matches `db.host` because the
-/// normalised path matches, and `APP_DB__HOST` matches explicitly. An exact path match
-/// wins; only when it does not exist is the relaxed form used. If two schema paths tie,
-/// [`Error::AmbiguousBinding`] is returned.
 pub fn bind_env(
     root: &Field,
     env: &BTreeMap<String, String>,
@@ -514,9 +675,9 @@ fn collect_paths(
     dotted: &mut BTreeMap<String, Vec<String>>,
     relaxed: &mut BTreeMap<String, Vec<String>>,
 ) {
-    match node.kind.as_str() {
-        "struct" => {
-            for (name, child) in &node.fields {
+    match &node.kind {
+        FieldType::Struct { fields } => {
+            for (name, child) in fields {
                 let child_path = if path.is_empty() {
                     name.clone()
                 } else {
@@ -526,11 +687,9 @@ fn collect_paths(
             }
         }
         // Lists are not mapped from the environment in this version.
-        "list" => {}
-        "optional" => {
-            if let Some(inner) = node.inner.as_deref() {
-                collect_paths(inner, path, dotted, relaxed);
-            }
+        FieldType::List { .. } => {}
+        FieldType::Optional { inner } | FieldType::Secret { inner } => {
+            collect_paths(inner, path, dotted, relaxed);
         }
         _ => {
             if !path.is_empty() {
@@ -543,29 +702,6 @@ fn collect_paths(
                     .or_default()
                     .push(path.to_string());
             }
-        }
-    }
-}
-
-/// Reports an unused subtree: leaves get their own entry so the suggestion is precise.
-fn report_unknown(node: &Node, path: &Path, known: &[String], out: &mut Vec<UnknownKey>) {
-    match &node.value {
-        Value::Map(entries) if !entries.is_empty() => {
-            for (key, child) in entries {
-                report_unknown(child, &path.clone().with_key(key.as_str()), known, out);
-            }
-        }
-        Value::Seq(items) if !items.is_empty() => {
-            for (index, child) in items.iter().enumerate() {
-                report_unknown(child, &path.clone().with_index(index), known, out);
-            }
-        }
-        _ => {
-            let rendered = path.to_string();
-            out.push(UnknownKey {
-                suggestion: best_suggestion(&rendered, known),
-                path: rendered,
-            });
         }
     }
 }
