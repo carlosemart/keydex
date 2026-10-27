@@ -20,8 +20,7 @@ Reserva del nombre. Sin implementación funcional.
 ### Added
 
 - `keydex` 0.0.1 publicado en PyPI como placeholder.
-- `keydex-core` 0.0.1 preparado para crates.io (pendiente de verificar el email de la
-  cuenta).
+- `keydex-core` 0.0.1 publicado en crates.io como placeholder.
 
 [Unreleased]: https://github.com/carlosemart/keydex/compare/v0.0.1...HEAD
 [0.0.1]: https://github.com/carlosemart/keydex/releases/tag/v0.0.1

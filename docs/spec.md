@@ -781,11 +781,11 @@ de entorno/reloj/FS: todo entra inyectado. Los errores son enums, nunca strings.
 
 | Nombre | PyPI | crates.io |
 |---|---|---|
-| `keydex` | pendiente de reserva | pendiente de reserva |
-| `keydex-core` | n/a | pendiente |
-| `keydex-py` | n/a | pendiente |
+| `keydex` | reservado: 0.0.1 publicada | no se usa |
+| `keydex-core` | n/a | reservado: 0.0.1 publicada |
+| `keydex-py` | n/a | no se publica (`publish = false`) |
 
-Verificado el 2026-10-27: `keydex` libre en ambos. Re-verificar el día de la reserva.
+Reservado el 2026-10-27: `keydex` 0.0.1 en PyPI y `keydex-core` 0.0.1 en crates.io.
 
 ---
 
