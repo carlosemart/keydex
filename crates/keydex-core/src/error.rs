@@ -95,12 +95,15 @@ pub enum Error {
     },
 
     /// Placeholder with invalid syntax.
-    #[error("malformed placeholder in {path}: {snippet}")]
+    ///
+    /// The offset is reported instead of the offending text: the fragment can contain a
+    /// secret, and this error may reach a log before redaction is possible.
+    #[error("malformed placeholder in {path} at byte {offset}")]
     MalformedPlaceholder {
         /// Key where the placeholder appears.
         path: String,
-        /// Offending fragment.
-        snippet: String,
+        /// Byte offset of the `${` that opens the malformed placeholder.
+        offset: usize,
     },
 
     /// Two schema paths tie for the same environment variable.

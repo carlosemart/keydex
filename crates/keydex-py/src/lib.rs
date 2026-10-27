@@ -68,7 +68,10 @@ impl PySettings {
     /// files when they were captured by us.
     fn fresh_spec(&self) -> PyResult<Spec> {
         let mut spec = self.spec.clone();
-        if !spec.refresh_env {
+        // The initial load only reads the process environment when there is a prefix;
+        // capturing it here without one would make refresh() change the meaning of every
+        // key named like a common variable (HOME, PATH, USER).
+        if !spec.refresh_env || spec.env_prefix.is_empty() {
             return Ok(spec);
         }
 
@@ -78,18 +81,21 @@ impl PySettings {
             let root = spec.secret_root.as_deref().ok_or_else(|| {
                 KeydexError::new_err("secret_root is required when secret_files is enabled")
             })?;
-            let root = std::fs::canonicalize(root)
+            let root = std::fs::canonicalize(expand_tilde(root))
                 .map_err(|err| KeydexError::new_err(format!("secret_root {root}: {err}")))?;
 
             for key in env.keys().cloned().collect::<Vec<_>>() {
-                if !key.ends_with("_FILE") {
+                let upper = key.to_ascii_uppercase();
+                if !upper.ends_with("_FILE") {
                     continue;
                 }
-                if !spec.env_prefix.is_empty() && !key.starts_with(&spec.env_prefix) {
+                if !spec.env_prefix.is_empty()
+                    && !upper.starts_with(&spec.env_prefix.to_ascii_uppercase())
+                {
                     continue;
                 }
                 let reference = env[&key].clone();
-                let resolved = std::fs::canonicalize(&reference).map_err(|err| {
+                let resolved = std::fs::canonicalize(expand_tilde(&reference)).map_err(|err| {
                     KeydexError::new_err(format!("{key}: cannot read {reference}: {err}"))
                 })?;
                 if !resolved.starts_with(&root) {
@@ -421,6 +427,22 @@ fn read_document(path: &str) -> PyResult<(String, Format)> {
     let format = Format::from_path(path)
         .ok_or_else(|| KeydexError::new_err(format!("unknown format for {path}")))?;
     Ok((contents, format))
+}
+
+/// Expands a leading `~` the way the Python side does, so a refresh resolves the same
+/// paths the first load did.
+fn expand_tilde(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    if path == "~" {
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(home);
+        }
+    }
+    PathBuf::from(path)
 }
 
 /// `dir/app.yaml` + `prod` -> `dir/app-prod.yaml`, when it exists.

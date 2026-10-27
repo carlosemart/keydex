@@ -21,6 +21,17 @@ class App:
     db: Db
 
 
+@dataclass(frozen=True)
+class WithPassword:
+    db: "PasswordDb"
+
+
+@dataclass(frozen=True)
+class PasswordDb:
+    user: str
+    password: str
+
+
 BASE = "db:\n  host: base\n  port: 5432\n"
 PROD = "db:\n  host: prod\n"
 
@@ -122,3 +133,41 @@ def test_a_prefix_still_reads_the_process_environment(
     settings = keydex.load_settings(files=[source], env_prefix="APP_")
 
     assert settings["host"] == "from-the-shell"
+
+
+def test_refresh_without_a_prefix_does_not_read_the_process_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The initial load ignores os.environ when there is no prefix; refresh must not
+    # reintroduce it through the Rust side, which captures the environment directly.
+    source = write(tmp_path, "app.yaml", "host: from-file\n")
+    settings = keydex.load_settings(files=[source])
+
+    monkeypatch.setenv("HOST", "from-the-shell")
+    settings.refresh()
+
+    assert settings["host"] == "from-file"
+
+
+def test_refresh_expands_a_home_relative_secret_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    (secrets / "password").write_text("s3cr3t", encoding="utf-8")
+    monkeypatch.setenv("APP_DB_PASSWORD_FILE", "~/secrets/password")
+
+    env = keydex.Environment(
+        files=[write(tmp_path, "app.yaml", "db:\n  user: u\n")],
+        env_prefix="APP_",
+        secret_files=True,
+        secret_root="~/secrets",
+    )
+    settings = env.load(WithPassword)
+    assert settings.db.password == "s3cr3t"
+
+    env.refresh()
+
+    assert env.settings()["db"] is None
+    assert env.explain("db.password")["redacted"] is True

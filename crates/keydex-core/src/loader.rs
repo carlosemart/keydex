@@ -155,7 +155,9 @@ impl Builder {
     /// Marks as sensitive every key bound from this environment variable.
     ///
     /// The mapping from variable to path is done by the same binder that resolved it, so
-    /// relaxed binding cannot desynchronise the mark.
+    /// relaxed binding cannot desynchronise the mark. Call it **before** the environment
+    /// source is added: the mark is applied while the value is inserted, and a later call
+    /// is a silent no-op.
     pub fn mark_sensitive_env(&mut self, name: &str) -> &mut Self {
         self.sensitive_env.insert(name.to_ascii_uppercase());
         self

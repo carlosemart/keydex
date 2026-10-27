@@ -49,7 +49,10 @@ First functional release. `0.0.1` was only a name reservation.
 - A `tuple[T]` annotation is rejected with `TypeError`; it used to be accepted and come back
   as a list.
 - With `env_prefix=""` and no `env`, the process environment is no longer read: `USER`,
-  `HOME` or `PATH` could silently override configuration keys.
+  `HOME` or `PATH` could silently override configuration keys. `refresh()` follows the same
+  rule, so a reload cannot reintroduce them.
+- `MalformedPlaceholder` reports the byte offset instead of the offending fragment, which
+  can contain a secret and would reach a log before redaction.
 
 ### Fixed
 
@@ -95,7 +98,7 @@ First functional release. `0.0.1` was only a name reservation.
 - `Format` is a closed enum; adding a format means editing the core.
 - `on_unknown` accepts `warn`, `error` and `ignore`; an unknown *value* of the option itself
   is not validated.
-- `~` is not expanded in `Path` values resolved by Rust `refresh()`.
+- `~` is not expanded in `Path` values, only in `secret_root` and `*_FILE` paths.
 - No validation ranges/regex, no `datetime`/`duration`/`size`, and no
   `pydantic`/`attrs`/`msgspec` models.
 

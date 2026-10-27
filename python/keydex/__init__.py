@@ -124,7 +124,7 @@ class Environment:
             self._on_unknown,
             list(self._sensitive) + _schema.sensitive_paths(model),
             secret_vars,
-            self._env is None,
+            self._env is None and bool(self._env_prefix),
             self._secret_files,
             str(self._secret_root) if self._secret_root is not None else None,
         )
@@ -244,7 +244,7 @@ def load_settings(
         list(profiles),
         list(sensitive),
         secret_vars,
-        env is None,
+        env is None and bool(env_prefix),
         secret_files,
         str(secret_root) if secret_root is not None else None,
     )
@@ -285,9 +285,11 @@ def _environment(
     sensitive: list[str] = []
 
     for key in list(source):
-        if not key.endswith("_FILE"):
+        # Case-insensitive, like the prefix matching in the engine: a lowercase
+        # `app_db_password_file` must not fall through as an ordinary key.
+        if not key.upper().endswith("_FILE"):
             continue
-        if prefix and not key.startswith(prefix):
+        if prefix and not key.upper().startswith(prefix.upper()):
             continue
 
         reference = Path(source[key]).expanduser()

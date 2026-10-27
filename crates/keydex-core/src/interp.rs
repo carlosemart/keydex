@@ -104,9 +104,9 @@ impl Resolver<'_> {
     }
 
     fn expand(&mut self, text: &str, path: &str) -> Result<Value> {
-        let placeholders = find(text).map_err(|snippet| Error::MalformedPlaceholder {
+        let placeholders = find(text).map_err(|offset| Error::MalformedPlaceholder {
             path: path.to_string(),
-            snippet,
+            offset,
         })?;
 
         // A string that is exactly one placeholder inherits the type of its target.
@@ -191,7 +191,7 @@ fn starts_with_at(bytes: &[u8], at: usize, pattern: &[u8]) -> bool {
     bytes.len() >= at + pattern.len() && &bytes[at..at + pattern.len()] == pattern
 }
 
-fn find(input: &str) -> std::result::Result<Vec<Placeholder<'_>>, String> {
+fn find(input: &str) -> std::result::Result<Vec<Placeholder<'_>>, usize> {
     let bytes = input.as_bytes();
     let mut out = Vec::new();
     let mut i = 0usize;
@@ -202,9 +202,9 @@ fn find(input: &str) -> std::result::Result<Vec<Placeholder<'_>>, String> {
             continue;
         }
         if starts_with_at(bytes, i, b"${") {
-            let close = matching_brace(input, i)?;
+            let close = matching_brace(input, i).map_err(|()| i)?;
             let inner = input.get(i + 2..close).unwrap_or_default();
-            out.push(parse_inner(inner, i, close + 1)?);
+            out.push(parse_inner(inner, i, close + 1).map_err(|()| i)?);
             i = close + 1;
         } else {
             i += 1;
@@ -214,7 +214,7 @@ fn find(input: &str) -> std::result::Result<Vec<Placeholder<'_>>, String> {
     Ok(out)
 }
 
-fn matching_brace(input: &str, open: usize) -> std::result::Result<usize, String> {
+fn matching_brace(input: &str, open: usize) -> std::result::Result<usize, ()> {
     let bytes = input.as_bytes();
     let mut depth = 0usize;
     let mut i = open;
@@ -234,17 +234,17 @@ fn matching_brace(input: &str, open: usize) -> std::result::Result<usize, String
         i += 1;
     }
 
-    Err(input.get(open..).unwrap_or_default().to_string())
+    Err(())
 }
 
 fn parse_inner(
     inner: &str,
     start: usize,
     end: usize,
-) -> std::result::Result<Placeholder<'_>, String> {
+) -> std::result::Result<Placeholder<'_>, ()> {
     let (target, default) = split_default(inner);
     if target.is_empty() {
-        return Err(inner.to_string());
+        return Err(());
     }
     let target = match target.split_once(':') {
         Some((name, args)) if !name.is_empty() && !name.contains('.') => Target::Resolver {

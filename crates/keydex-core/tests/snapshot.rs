@@ -384,3 +384,24 @@ fn a_container_holding_a_secret_is_sensitive() {
         "reading the parent would leak the child"
     );
 }
+
+#[test]
+fn a_malformed_placeholder_reports_an_offset_not_the_text() {
+    let mut builder = Builder::new();
+    builder
+        .document(
+            "x.yaml",
+            "secret: \"${unclosed s3cr3t-value\"\n",
+            Format::Yaml,
+            Tier::BaseFile,
+        )
+        .unwrap();
+
+    let error = builder.build().unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains("byte"), "{message}");
+    assert!(
+        !message.contains("s3cr3t-value"),
+        "the fragment can hold a secret: {message}"
+    );
+}

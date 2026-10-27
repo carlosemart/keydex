@@ -465,6 +465,9 @@ Sensitivity is a **property of the node**, not a wrapper applied at the end:
 - `refresh()` (dictionary mode): re-reads the sources, validates and **only then** swaps
   atomically. If it fails, the current snapshot keeps serving and the error is reported.
   Configuration is never left half applied. **Implemented.**
+- `refresh()` only re-reads the process environment when a prefix was given, the same rule
+  the first load follows. Otherwise `HOST`, `HOME` or `PATH` would appear on the second
+  load and nowhere on the first. **Implemented.**
 - A typed model is an immutable copy: to reload, call `load()` again.
 - Thread safety: shared immutable snapshot; the `Settings` handle holds it behind an
   `ArcSwap`: reads take no lock and `refresh()` swaps the pointer.
