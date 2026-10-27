@@ -1,7 +1,7 @@
 # keydex — project instructions
 
-Specification: `docs/spec.md`. Decisions: `docs/adr/`. Read them before touching
-`crates/`. If code and spec disagree, the spec wins: ask before changing it.
+Specification: `docs/spec.md`. Architecture: `docs/architecture.md`. Read them before
+touching `crates/`. If code and spec disagree, the spec wins: ask before changing it.
 
 ## What keydex is
 
@@ -37,8 +37,7 @@ crates/keydex-core  pure engine: sources, precedence, merge, interp, coercion
 crates/keydex-py    PyO3 binding (F1), publish = false
 python/keydex       public API, types and integrations (F1)
 docs/spec.md        current specification
-docs/architecture.md  how the pieces fit (read before refactors)
-docs/adr/           irreversible decisions
+docs/architecture.md  how the pieces fit, and why (read before refactors)
 ```
 
 ## Commands

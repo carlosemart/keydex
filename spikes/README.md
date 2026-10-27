@@ -6,7 +6,7 @@ evidence for a decision, not production code.
 
 | Spike | Question | Result |
 |---|---|---|
-| [`spans/`](spans/) | Can YAML/TOML/JSON give us line and column, and at what cost? | [docs/spikes/0001-parsers-spans.md](../../docs/spikes/0001-parsers-spans.md) |
+| [`spans/`](spans/) | Can YAML/TOML/JSON give us line and column, and at what cost? | Summarised in [the architecture](../../docs/architecture.md#why-these-choices) |
 
 ## Run
 

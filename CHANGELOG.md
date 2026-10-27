@@ -36,10 +36,7 @@ First functional release. `0.0.1` was only a name reservation.
 - **Wheels**: `abi3-py311` built; `cp314t` built and tested in CI with the GIL verified
   off. **Nothing is published yet.**
 - Runnable example: [`examples/homelab-demo`](examples/homelab-demo/).
-- Architecture gates (`scripts/gate.sh` with a self-test, `clippy.toml`, `deny.toml`) and
-  ADRs [0006](docs/adr/0006-parsers-with-spans.md),
-  [0007](docs/adr/0007-schema-ir-over-serde.md) and
-  [0008](docs/adr/0008-arc-swap-lock-free-reads.md).
+- Architecture gates (`scripts/gate.sh` with a self-test, `clippy.toml`, `deny.toml`).
 
 ### Changed
 

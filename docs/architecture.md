@@ -155,18 +155,19 @@ declares `gil_used = false`.
 **I/O.** Only `keydex-py` and `python/keydex/__init__.py` touch the filesystem. The core
 receives contents.
 
-## Decisions
+## Why these choices
 
-| ADR | Decision |
-|---|---|
-| [0001](adr/0001-name-keydex.md) | name |
-| [0002](adr/0002-no-expressions.md) | interpolation without expressions |
-| [0003](adr/0003-wheels-abi3-and-314t.md) | `abi3` and free-threaded builds |
-| [0004](adr/0004-schema-ir-versioning.md) | IR versioned apart from the package |
-| [0005](adr/0005-mandatory-spans.md) | spans are mandatory |
-| [0006](adr/0006-parsers-with-spans.md) | `saphyr`, `toml_edit`, `jsonc-parser` |
-| [0007](adr/0007-schema-ir-over-serde.md) | the IR travels as JSON |
-| [0008](adr/0008-arc-swap-lock-free-reads.md) | lock-free reads |
+- **No expression language.** Interpolation resolves references and pure resolvers only.
+  A value that needs arithmetic belongs in code; an expression engine would drag a parser,
+  type rules and an attack surface into the engine.
+- **Two wheel builds.** `abi3-py311` covers 3.11–3.15, but the stable ABI does not apply to
+  free-threaded interpreters, so `cp314t` is a separate build with `gil_used = false`.
+- **The IR is versioned apart from the package.** Consumers pin `keydex.schema/v1`, not the
+  crate version, so a dump stays readable across releases.
+- **Parsers chosen on evidence.** `saphyr` (YAML), `toml_edit` (TOML) and `jsonc-parser`
+  (JSON, incl. JSONC) all preserve spans; `serde_yaml` is archived and `jiter` exposes no
+  positions. Provenance costs about 12% on YAML, and converting byte offsets to
+  line/column naively is quadratic, which is why one `LineIndex` is built per file.
 
 ## Known gaps
 

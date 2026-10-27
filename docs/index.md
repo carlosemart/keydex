@@ -6,8 +6,6 @@ Typed, explainable and fast configuration access for Python, with the engine in 
 - **[Rust guide](rust.md)** — using `keydex-core` directly, without Python.
 - **[API reference](api.md)** — generated from the docstrings.
 - **[Specification](spec.md)** — the contract: precedence, binding, IR, budgets.
-- **[Architecture decisions](adr/0001-name-keydex.md)** — why each irreversible choice was
-  made.
 
 ## In one example
 

@@ -174,7 +174,6 @@ multi-language binding layer. See `AGENTS.md`.
 - [Troubleshooting](docs/troubleshooting.md)
 - [Status: what exists and what does not](docs/status.md)
 - [Specification](docs/spec.md)
-- [Architecture decisions](docs/adr/)
 - [Agent instructions](AGENTS.md)
 - [Runnable example: homelab service](examples/homelab-demo/)
 

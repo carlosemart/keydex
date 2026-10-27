@@ -230,4 +230,4 @@ core. It is the next extension point, not a current one.
 - No global registration: everything is passed explicitly.
 
 See [the specification](spec.md) for the full contract and
-[the ADRs](adr/0001-name-keydex.md) for the reasoning behind each irreversible decision.
+[the architecture](architecture.md) for the reasoning behind the design.

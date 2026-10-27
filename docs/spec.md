@@ -575,7 +575,7 @@ keydex/
 ### 17.3 Key dependencies
 
 - **YAML with spans:** `saphyr` 0.3 (bundles `marked_yaml`). Confirmed in
-  [spike 0001](spikes/0001-parsers-spans.md).
+  a spike run in F0.
 - **TOML with spans:** `toml_edit` 0.25, using `Document` (not `DocumentMut`, which drops
   spans).
 - **JSON with positions:** `jsonc-parser` 0.34. `jiter` was discarded: faster, but it
@@ -716,7 +716,7 @@ Dogfooding: `examples/homelab-demo` exercises the full surface.
 | Risk | Mitigation |
 |---|---|
 | Python↔Rust drift of the Schema IR | Versioned IR + cross tests with shared fixtures |
-| Parsers without enough spans | **Resolved in F0**: all three formats give spans ([spike 0001](spikes/0001-parsers-spans.md)) |
+| Parsers without enough spans | **Resolved in F0**: all three formats give spans |
 | Ambiguous binding in dictionary mode | Strict `__` rule, documented and tested |
 | `abi3` vs free-threading diverge | Two build profiles; a dedicated `t` job |
 | Scope creep towards a framework | Non-goals in the README and per-phase review |
@@ -732,7 +732,7 @@ The working documentation lives in the repository, in four layers:
 |---|---|---|---|
 | Rules | `AGENTS.md` | imperative and verifiable, ≤100 lines | loaded on every session |
 | Context | `docs/spec.md` | this specification | the "why" and the contracts |
-| Decisions | `docs/adr/NNNN-*.md` | one ADR per irreversible decision | stops re-litigating and losing the reason |
+| Rationale | `docs/architecture.md` | why the pieces are shaped this way | the code cannot explain intent |
 | **Execution** | CI + `./scripts/gate.sh` | what a test can check | **prose is ignored; a red build is not** |
 
 There is also `crates/keydex-core/AGENTS.md`, loaded when working inside that subtree.
@@ -809,8 +809,6 @@ keydex/
 │   ├── rust.md               # Rust usage guide
 │   ├── benchmarks.md
 │   ├── release.md
-│   ├── adr/                  # 0001-*.md …
-│   └── spikes/               # measured evidence
 ├── examples/homelab-demo/    # runnable example
 ├── AGENTS.md
 ├── CHANGELOG.md
@@ -854,8 +852,6 @@ The IR survives several package versions. That is what keeps an old `dump` reada
   not after the first incident.
 - **Dual license MIT OR Apache-2.0**: Rust ecosystem convention and corporate friendly.
 - **`CHANGELOG.md`**: Keep a Changelog format.
-- **`docs/adr/`**: the irreversible decisions already taken (name, no expressions,
-  `abi3` + `cp314t`, versioned IR, mandatory spans, parser selection, serde transport).
 
 ### 26.6 Release flow
 
