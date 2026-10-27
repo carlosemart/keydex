@@ -2,9 +2,9 @@
 
 Acceso a configuración para Python: **tipado, explicable y rápido**, con el motor en Rust.
 
-> Estado: pre-alpha. Todavía no hay nada instalable. El repositorio está creado; la
-> reserva del nombre en PyPI y crates.io está pendiente de las credenciales de
-> publicación.
+> Estado: pre-alpha. `keydex 0.0.1` en PyPI solo reserva el nombre: todavía no hay
+> nada funcional. En crates.io la reserva de `keydex-core` está pendiente de verificar
+> el email de la cuenta.
 
 ## La idea
 

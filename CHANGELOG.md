@@ -13,4 +13,15 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - Gates de arquitectura (`scripts/gate.sh`) y `clippy.toml` con los métodos
   prohibidos en el core.
 
-[Unreleased]: https://github.com/carlosemart/keydex/commits/main
+## [0.0.1] - 2026-10-27
+
+Reserva del nombre. Sin implementación funcional.
+
+### Added
+
+- `keydex` 0.0.1 publicado en PyPI como placeholder.
+- `keydex-core` 0.0.1 preparado para crates.io (pendiente de verificar el email de la
+  cuenta).
+
+[Unreleased]: https://github.com/carlosemart/keydex/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/carlosemart/keydex/releases/tag/v0.0.1
