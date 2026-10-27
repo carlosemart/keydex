@@ -1,8 +1,8 @@
 //! Binding de Python (PyO3) para `keydex`.
 //!
-//! Es una capa fina: no implementa semántica, solo traduce. La regla dura 5 manda que
-//! ningún acceso a atributo cruce la frontera FFI más de lo imprescindible: el motor
-//! construye un snapshot inmutable y `Settings` solo lo consulta.
+//! Capa fina: no implementa semántica, solo traduce. El motor construye un snapshot
+//! inmutable y `Settings` solo lo consulta; `refresh()` construye otro y lo intercambia
+//! de forma atómica.
 //!
 //! `extension-module` está activo siempre, así que este crate **no** se puede enlazar en
 //! `cargo test --workspace` (requiere libpython). Se compila con `cargo check -p
@@ -11,7 +11,8 @@
 //! TODO(F4): declarar `gil_used = false` cuando se publique el wheel `cp314t`.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 
 use keydex_core::{
     Builder, Error, Explanation, Format, Provenance, Schema, Snapshot, Tier, Value, coerce,
@@ -24,10 +25,29 @@ use pyo3::types::{PyDict, PyList};
 
 create_exception!(keydex, KeydexError, PyException);
 
+/// Todo lo necesario para reconstruir el snapshot en `refresh()`.
+#[derive(Debug, Clone)]
+struct Spec {
+    files: Vec<String>,
+    profiles: Vec<String>,
+    env_prefix: String,
+    env: BTreeMap<String, String>,
+}
+
 /// Configuración resuelta, inmutable y consultable por clave.
 #[pyclass(name = "Settings", module = "keydex", frozen)]
 struct PySettings {
-    inner: Arc<Snapshot>,
+    spec: Spec,
+    inner: Arc<RwLock<Arc<Snapshot>>>,
+}
+
+impl PySettings {
+    fn snapshot(&self) -> PyResult<Arc<Snapshot>> {
+        self.inner
+            .read()
+            .map(|guard| Arc::clone(&guard))
+            .map_err(|_| KeydexError::new_err("estado interno envenenado"))
+    }
 }
 
 #[pymethods]
@@ -35,7 +55,7 @@ impl PySettings {
     /// Devuelve el valor de una clave, o `default` si no existe.
     #[pyo3(signature = (key, default = None))]
     fn get(&self, py: Python<'_>, key: &str, default: Option<Py<PyAny>>) -> PyResult<Py<PyAny>> {
-        match self.inner.get(key) {
+        match self.snapshot()?.get(key) {
             Some(value) => to_py(py, value),
             None => Ok(default.unwrap_or_else(|| py.None())),
         }
@@ -43,28 +63,29 @@ impl PySettings {
 
     /// Igual que `get`, pero lanza `KeyError` si la clave no existe.
     fn __getitem__(&self, py: Python<'_>, key: &str) -> PyResult<Py<PyAny>> {
-        match self.inner.get(key) {
+        match self.snapshot()?.get(key) {
             Some(value) => to_py(py, value),
             None => Err(PyKeyError::new_err(key.to_string())),
         }
     }
 
-    fn __contains__(&self, key: &str) -> bool {
-        self.inner.get(key).is_some()
+    fn __contains__(&self, key: &str) -> PyResult<bool> {
+        Ok(self.snapshot()?.get(key).is_some())
     }
 
-    fn __len__(&self) -> usize {
-        self.inner.len()
+    fn __len__(&self) -> PyResult<usize> {
+        Ok(self.snapshot()?.len())
     }
 
     /// Claves en orden lexicográfico.
-    fn keys(&self) -> Vec<String> {
-        self.inner.keys().map(ToString::to_string).collect()
+    fn keys(&self) -> PyResult<Vec<String>> {
+        Ok(self.snapshot()?.keys().map(ToString::to_string).collect())
     }
 
     /// Pares (clave, valor) en orden lexicográfico.
     fn items(&self, py: Python<'_>) -> PyResult<Vec<(String, Py<PyAny>)>> {
-        self.inner
+        let snapshot = self.snapshot()?;
+        snapshot
             .iter()
             .map(|(key, value)| Ok((key.to_string(), to_py(py, value)?)))
             .collect()
@@ -72,54 +93,58 @@ impl PySettings {
 
     /// Procedencia de una clave, o `None` si no existe.
     fn explain(&self, py: Python<'_>, key: &str) -> PyResult<Py<PyAny>> {
-        match self.inner.explain(key) {
+        match self.snapshot()?.explain(key) {
             Some(explanation) => explanation_to_py(py, &explanation),
             None => Ok(py.None()),
         }
     }
 
-    fn __repr__(&self) -> String {
-        format!("<keydex.Settings keys={}>", self.inner.len())
+    /// Relee las fuentes y sustituye el snapshot.
+    ///
+    /// Si algo falla, el snapshot vigente se mantiene: nunca queda configuración a medias.
+    fn refresh(&self) -> PyResult<()> {
+        let snapshot = build_snapshot(&self.spec)?;
+        let mut guard = self
+            .inner
+            .write()
+            .map_err(|_| KeydexError::new_err("estado interno envenenado"))?;
+        *guard = Arc::new(snapshot);
+        Ok(())
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!("<keydex.Settings keys={}>", self.snapshot()?.len()))
     }
 }
 
 #[pyfunction]
-#[pyo3(signature = (files, env_prefix = "", env = None))]
-/// Carga uno o varios ficheros de configuración y les aplica las variables de entorno.
-///
-/// `env` permite inyectar un entorno propio (tests); si se omite, se usa el del proceso.
+#[pyo3(signature = (files, env_prefix = "", env = None, profiles = Vec::new()))]
+/// Carga uno o varios ficheros y les aplica variables de entorno y perfiles.
 fn load(
     files: Vec<String>,
     env_prefix: &str,
     env: Option<HashMap<String, String>>,
+    profiles: Vec<String>,
 ) -> PyResult<PySettings> {
-    let environment: BTreeMap<String, String> = match env {
-        Some(map) => map.into_iter().collect(),
-        None => std::env::vars().collect(),
+    let spec = Spec {
+        files,
+        profiles,
+        env_prefix: env_prefix.to_string(),
+        env: match env {
+            Some(map) => map.into_iter().collect(),
+            None => std::env::vars().collect(),
+        },
     };
-
-    let mut builder = Builder::new().with_env(environment);
-    builder.env_source(env_prefix, Tier::Environment);
-
-    for path in files {
-        let contents = std::fs::read_to_string(&path)
-            .map_err(|err| KeydexError::new_err(format!("{path}: {err}")))?;
-        let format = Format::from_path(&path)
-            .ok_or_else(|| KeydexError::new_err(format!("formato desconocido para {path}")))?;
-        builder
-            .document(&path, &contents, format, Tier::BaseFile)
-            .map_err(to_py_err)?;
-    }
-
-    let snapshot = builder.build().map_err(to_py_err)?;
+    let snapshot = build_snapshot(&spec)?;
     Ok(PySettings {
-        inner: Arc::new(snapshot),
+        spec,
+        inner: Arc::new(RwLock::new(Arc::new(snapshot))),
     })
 }
 
 #[pyfunction]
-#[pyo3(signature = (ir, files, env_prefix = "", env = None))]
-/// Carga con esquema: aplica binding relajado, coacciona y valida.
+#[pyo3(signature = (ir, files, env_prefix = "", env = None, profiles = Vec::new()))]
+/// Carga con esquema: binding relajado, coerción y validación.
 ///
 /// Devuelve `(True, arbol)` o `(False, errores)`. La capa de Python decide qué excepción
 /// lanzar; el motor no conoce las clases de excepción de Python.
@@ -129,28 +154,24 @@ fn load_typed(
     files: Vec<String>,
     env_prefix: &str,
     env: Option<HashMap<String, String>>,
+    profiles: Vec<String>,
 ) -> PyResult<(bool, Py<PyAny>)> {
     let schema = Schema::from_json(ir).map_err(to_py_err)?;
-
-    let environment: BTreeMap<String, String> = match env {
-        Some(map) => map.into_iter().collect(),
-        None => std::env::vars().collect(),
+    let spec = Spec {
+        files,
+        profiles,
+        env_prefix: env_prefix.to_string(),
+        env: match env {
+            Some(map) => map.into_iter().collect(),
+            None => std::env::vars().collect(),
+        },
     };
 
-    let mut builder = Builder::new().with_env(environment);
+    let mut builder = Builder::new().with_env(spec.env.clone());
     builder
-        .schema_env_source(&schema, env_prefix, Tier::Environment)
+        .schema_env_source(&schema, &spec.env_prefix, Tier::Environment)
         .map_err(to_py_err)?;
-
-    for path in files {
-        let contents = std::fs::read_to_string(&path)
-            .map_err(|err| KeydexError::new_err(format!("{path}: {err}")))?;
-        let format = Format::from_path(&path)
-            .ok_or_else(|| KeydexError::new_err(format!("formato desconocido para {path}")))?;
-        builder
-            .document(&path, &contents, format, Tier::BaseFile)
-            .map_err(to_py_err)?;
-    }
+    add_documents(&mut builder, &spec)?;
 
     let snapshot = builder.build().map_err(to_py_err)?;
 
@@ -167,6 +188,74 @@ fn load_typed(
             Ok((false, list.into_any().unbind()))
         }
     }
+}
+
+fn build_snapshot(spec: &Spec) -> PyResult<Snapshot> {
+    let mut builder = Builder::new().with_env(spec.env.clone());
+    builder.env_source(&spec.env_prefix, Tier::Environment);
+    add_documents(&mut builder, spec)?;
+    builder.build().map_err(to_py_err)
+}
+
+/// Añade los ficheros base y, después, los de cada perfil activo.
+///
+/// Convención: `app.yaml` + perfil `prod` → `app-prod.yaml`, en el mismo directorio. Si
+/// el fichero de perfil no existe se ignora; el último perfil de la lista gana.
+fn add_documents(builder: &mut Builder, spec: &Spec) -> PyResult<()> {
+    for path in &spec.files {
+        let (contents, format) = read_document(path)?;
+        builder
+            .document(path, &contents, format, Tier::BaseFile)
+            .map_err(to_py_err)?;
+    }
+
+    for profile in &spec.profiles {
+        for base in &spec.files {
+            let Some(path) = profile_path(base, profile) else {
+                continue;
+            };
+            let (contents, format) = read_document(&path)?;
+            builder
+                .document(&path, &contents, format, Tier::ProfileFile)
+                .map_err(to_py_err)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn read_document(path: &str) -> PyResult<(String, Format)> {
+    let contents = std::fs::read_to_string(path)
+        .map_err(|err| KeydexError::new_err(format!("{path}: {err}")))?;
+    let format = Format::from_path(path)
+        .ok_or_else(|| KeydexError::new_err(format!("formato desconocido para {path}")))?;
+    Ok((contents, format))
+}
+
+/// `dir/app.yaml` + `prod` → `dir/app-prod.yaml`, si existe.
+fn profile_path(base: &str, profile: &str) -> Option<String> {
+    let path = Path::new(base);
+    let stem = path.file_stem()?.to_str()?;
+    let extension = path.extension()?.to_str()?;
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    let candidate: PathBuf = parent.join(format!("{stem}-{profile}.{extension}"));
+    candidate
+        .exists()
+        .then(|| candidate.to_str().map(ToString::to_string))
+        .flatten()
+}
+
+fn to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> {
+    Ok(match value {
+        Value::Null => py.None(),
+        Value::Bool(b) => b.into_py_any(py)?,
+        Value::Int(i) => i.into_py_any(py)?,
+        Value::Float(f) => f.into_py_any(py)?,
+        Value::Str(s) => s.into_py_any(py)?,
+        // `Value` es `non_exhaustive`: un valor futuro se expone como `None` hasta que
+        // esta capa lo traduzca.
+        _ => py.None(),
+    })
 }
 
 fn json_to_py(py: Python<'_>, value: &serde_json::Value) -> PyResult<Py<PyAny>> {
@@ -192,19 +281,6 @@ fn json_to_py(py: Python<'_>, value: &serde_json::Value) -> PyResult<Py<PyAny>> 
             }
             dict.into_any().unbind()
         }
-    })
-}
-
-fn to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> {
-    Ok(match value {
-        Value::Null => py.None(),
-        Value::Bool(b) => b.into_py_any(py)?,
-        Value::Int(i) => i.into_py_any(py)?,
-        Value::Float(f) => f.into_py_any(py)?,
-        Value::Str(s) => s.into_py_any(py)?,
-        // `Value` es `non_exhaustive`: un valor futuro se expone como `None` hasta que
-        // esta capa lo traduzca.
-        _ => py.None(),
     })
 }
 

@@ -24,6 +24,9 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
   sin `__`), `keydex.load(Modelo)` y `ValidationError` con `errors` por ruta.
   Convertidores ricos (`Enum`, `Path`, `Decimal`, `UUID`) en la capa de Python.
   ADR [0007](docs/adr/0007-schema-ir-con-serde.md).
+- **F3**: perfiles (`app-prod.yaml`), secretos (`Secret[T]`, indirección `*_FILE`),
+  `refresh()` con intercambio atómico y CLI (`python -m keydex explain|dump`).
+  `includes` queda pendiente para F3.1.
 
 ## [0.0.1] - 2026-10-27
 

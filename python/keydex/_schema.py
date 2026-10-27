@@ -15,6 +15,8 @@ from enum import Enum
 from pathlib import Path
 from uuid import UUID
 
+from keydex._secrets import Secret
+
 IR_VERSION = "keydex.schema/v1"
 
 _CONVERTERS: dict[type, str] = {Path: "path", Decimal: "decimal", UUID: "uuid"}
@@ -39,6 +41,13 @@ def _node(tp: object, *, required: bool) -> dict:
             "required": False,
             "inner": _node(args[0], required=False),
         }
+
+    if origin is Secret:
+        args = typing.get_args(tp)
+        inner = args[0] if args else str
+        if inner is not str:
+            raise TypeError("Secret[T] solo admite str por ahora")
+        return {"type": "str", "required": required, "converter": "secret"}
 
     if origin in (list, tuple):
         args = typing.get_args(tp)
@@ -96,6 +105,9 @@ def _convert(tp: object, value: object) -> object:
         args = typing.get_args(tp)
         item = args[0] if args else str
         return [_convert(item, element) for element in typing.cast("list[object]", value)]
+
+    if origin is Secret:
+        return Secret(value)
 
     if dataclasses.is_dataclass(tp) and isinstance(value, dict):
         return build(typing.cast("type", tp), typing.cast("dict", value))

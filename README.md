@@ -2,8 +2,8 @@
 
 Acceso a configuración para Python: **tipado, explicable y rápido**, con el motor en Rust.
 
-> Estado: F1. Motor completo y binding en **modo diccionario** (`keydex.load` +
-> `explain`). Los modelos tipados llegan en F2. En PyPI solo hay un placeholder de
+> Estado: F3. Modelos tipados, perfiles, secretos, `refresh()` y CLI. Pendiente: F4
+> (publicación de wheels) y las fuentes remotas. En PyPI solo hay un placeholder de
 > reserva: por ahora se instala desde el repo.
 
 ## Instalación (desde el repo)
@@ -67,6 +67,50 @@ El `explain` devuelve una estructura, no un texto:
   ],
   "refs": [],
 }
+```
+
+## Perfiles
+
+```python
+# app.yaml + app-prod.yaml (mismo directorio, mismo nombre con sufijo)
+cfg = keydex.load(App, files=["config/app.yaml"], profiles=["prod"])
+```
+
+El perfil se aplica en la banda `ProfileFile`, por encima del fichero base. Si el
+fichero de perfil no existe se ignora; si hay varios perfiles, el último gana.
+
+## Secretos
+
+```python
+from keydex import Secret
+
+@dataclass(frozen=True)
+class Db:
+    password: Secret[str]
+
+cfg.db.password            # Secret('***')
+cfg.db.password.reveal()   # el valor real
+```
+
+`repr`, `str` y cualquier log del dataclass muestran `***`. Además se admite la
+indirección de Docker/K8s:
+
+```bash
+APP_DB__PASSWORD_FILE=/run/secrets/db_password
+```
+
+## Recarga
+
+```python
+cfg = keydex.load_settings(files=["app.yaml"])
+cfg.refresh()      # relee; si falla, el snapshot vigente se mantiene
+```
+
+## CLI
+
+```bash
+python -m keydex explain db.host --files config/app.yaml --env-prefix APP_
+python -m keydex dump --files config/app.yaml
 ```
 
 ## La idea

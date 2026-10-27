@@ -290,6 +290,10 @@ labels:
 y detección de ciclos. Un import hereda el perfil activo del importador salvo que
 declare lo contrario.
 
+> **Estado:** no implementado. Depende de que la capa que llama resuelva los ficheros
+> (el core no toca el sistema de ficheros), así que vive en el binding y no en el motor.
+> Pendiente para F3.1.
+
 ---
 
 ## 10. Perfiles
@@ -635,7 +639,7 @@ en ese momento.
 | **F0** ✅ | Workspace, `AGENTS.md` + `docs/spec.md` + `just gate`, spikes de parsers con spans, esqueleto de errores | Spans correctos y `just gate` en verde |
 | **F1** ✅ | `keydex-core` (sources, merge, interp, snapshot) + `keydex-py` dict-mode | Carga YAML+env, `${}`, `explain`, benchmark vs OmegaConf |
 | **F2** ✅ | Esquema tipado: dataclasses, coerción, validación agregada | `load(App)` completo con errores con path. `.pyi` generado no hace falta: los dataclasses ya dan tipos a mypy y al IDE |
-| **F3** | Perfiles, includes, secretos, `refresh()`, CLI | Suite dorada verde; secretos sin fuga |
+| **F3** ✅ | Perfiles por convención de ficheros, secretos (`Secret`, `*_FILE`), `refresh()`, CLI | Suite verde; los secretos no se filtran en `repr` |
 | **F4** | Publicación: wheels abi3 + 314t, crates.io, docs | Instalable desde PyPI en 3.11–3.14t |
 | **F5 (v2)** | `watch()`, fuentes remotas async, plugin de composición tipo Hydra | Solo con demanda real |
 
