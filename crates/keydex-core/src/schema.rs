@@ -15,7 +15,8 @@ use serde_json::{Map, Value as Json};
 
 use crate::error::{Error, Result};
 use crate::snapshot::Snapshot;
-use crate::value::Value;
+use crate::source::Path;
+use crate::value::{Node, Value};
 
 /// Version of the IR understood by this engine.
 pub const IR_VERSION: &str = "keydex.schema/v1";
@@ -102,14 +103,60 @@ pub fn unknown_keys(snapshot: &Snapshot, schema: &Schema) -> Vec<UnknownKey> {
     let mut known = Vec::new();
     collect_leaf_paths(&schema.root, "", &mut known);
 
-    snapshot
-        .keys()
-        .filter(|key| !is_known(&schema.root, key))
-        .map(|key| UnknownKey {
-            path: key.to_string(),
-            suggestion: best_suggestion(key, &known),
-        })
-        .collect()
+    let mut out = Vec::new();
+    walk_unknown(
+        &schema.root,
+        Some(snapshot.root()),
+        &Path::root(),
+        &known,
+        &mut out,
+    );
+    out
+}
+
+fn walk_unknown(
+    field: &Field,
+    node: Option<&Node>,
+    path: &Path,
+    known: &[String],
+    out: &mut Vec<UnknownKey>,
+) {
+    let Some(node) = node else {
+        return;
+    };
+
+    match field.kind.as_str() {
+        "struct" => {
+            let Value::Map(entries) = &node.value else {
+                return;
+            };
+            for (key, child) in entries {
+                let child_path = path.clone().with_key(key.as_str());
+                match field.fields.get(key) {
+                    Some(child_field) => {
+                        walk_unknown(child_field, Some(child), &child_path, known, out);
+                    }
+                    None => report_unknown(child, &child_path, known, out),
+                }
+            }
+        }
+        "list" => {
+            let (Value::Seq(items), Some(item_field)) = (&node.value, field.items.as_deref())
+            else {
+                return;
+            };
+            for (index, child) in items.iter().enumerate() {
+                let child_path = path.clone().with_index(index);
+                walk_unknown(item_field, Some(child), &child_path, known, out);
+            }
+        }
+        "optional" => {
+            if let Some(inner) = field.inner.as_deref() {
+                walk_unknown(inner, Some(node), path, known, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn collect_leaf_paths(node: &Field, path: &str, out: &mut Vec<String>) {
@@ -140,64 +187,6 @@ fn collect_leaf_paths(node: &Field, path: &str, out: &mut Vec<String>) {
             }
         }
     }
-}
-
-fn is_known(root: &Field, path: &str) -> bool {
-    let mut current = root;
-    for segment in segments(path) {
-        let node = unwrap_optional(current);
-        if segment.starts_with('[') {
-            if node.kind != "list" {
-                return false;
-            }
-            match node.items.as_deref() {
-                Some(items) => current = items,
-                None => return false,
-            }
-        } else {
-            if node.kind != "struct" {
-                return false;
-            }
-            match node.fields.get(segment) {
-                Some(field) => current = field,
-                None => return false,
-            }
-        }
-    }
-    true
-}
-
-/// Splits `servers[0].host` into `["servers", "[0]", "host"]`.
-fn segments(path: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    for part in path.split('.') {
-        let Some(open) = part.find('[') else {
-            out.push(part);
-            continue;
-        };
-        if open > 0 {
-            out.push(&part[..open]);
-        }
-        let mut rest = &part[open..];
-        while let Some(close) = rest.find(']') {
-            out.push(&rest[..=close]);
-            rest = &rest[close + 1..];
-            if rest.is_empty() {
-                break;
-            }
-        }
-    }
-    out
-}
-
-fn unwrap_optional(mut node: &Field) -> &Field {
-    while node.kind == "optional" {
-        match node.inner.as_deref() {
-            Some(inner) => node = inner,
-            None => break,
-        }
-    }
-    node
 }
 
 fn best_suggestion(unknown: &str, known: &[String]) -> Option<String> {
@@ -255,7 +244,12 @@ pub type Coerced = core::result::Result<Json, Vec<ValidationError>>;
 /// omitted so the caller can apply its own defaults.
 pub fn coerce(snapshot: &Snapshot, schema: &Schema) -> Coerced {
     let mut errors = Vec::new();
-    let slot = node(&schema.root, "", snapshot, &mut errors);
+    let slot = node(
+        &schema.root,
+        Some(snapshot.root()),
+        &Path::root(),
+        &mut errors,
+    );
 
     if !errors.is_empty() {
         return Err(errors);
@@ -281,100 +275,102 @@ impl Slot {
     }
 }
 
-fn node(field: &Field, path: &str, snapshot: &Snapshot, errors: &mut Vec<ValidationError>) -> Slot {
+fn node(
+    field: &Field,
+    current: Option<&Node>,
+    path: &Path,
+    errors: &mut Vec<ValidationError>,
+) -> Slot {
     match field.kind.as_str() {
         "struct" => {
+            let map = match current.map(|node| &node.value) {
+                Some(Value::Map(map)) => Some(map),
+                Some(other) => {
+                    errors.push(ValidationError {
+                        path: path.to_string(),
+                        message: format!("expected an object, got {}", kind_of(other)),
+                    });
+                    return Slot::Missing;
+                }
+                None => None,
+            };
+
             let mut object = Map::new();
             for (name, child) in &field.fields {
-                let child_path = if path.is_empty() {
-                    name.clone()
-                } else {
-                    format!("{path}.{name}")
-                };
-                if let Some(value) = node(child, &child_path, snapshot, errors).into_option() {
+                let child_node = map.and_then(|entries| entries.get(name));
+                let child_path = path.clone().with_key(name.as_str());
+                if let Some(value) = node(child, child_node, &child_path, errors).into_option() {
                     object.insert(name.clone(), value);
                 }
             }
+
             if object.is_empty() && !field.required {
                 Slot::Missing
             } else {
                 Slot::Value(Json::Object(object))
             }
         }
-        "optional" => {
-            if snapshot.get(path).is_none() {
-                return Slot::Value(Json::Null);
-            }
-            match snapshot.get(path) {
-                Some(Value::Null) => Slot::Value(Json::Null),
-                _ => match field.inner.as_deref() {
-                    Some(inner) => node(inner, path, snapshot, errors),
-                    None => {
+        "optional" => match current.map(|node| &node.value) {
+            None | Some(Value::Null) => Slot::Value(Json::Null),
+            _ => match field.inner.as_deref() {
+                Some(inner) => node(inner, current, path, errors),
+                None => {
+                    errors.push(ValidationError {
+                        path: path.to_string(),
+                        message: String::from("optional without inner type"),
+                    });
+                    Slot::Missing
+                }
+            },
+        },
+        "list" => {
+            let Some(item) = field.items.as_deref() else {
+                errors.push(ValidationError {
+                    path: path.to_string(),
+                    message: String::from("list without item type"),
+                });
+                return Slot::Missing;
+            };
+
+            match current.map(|node| &node.value) {
+                Some(Value::Seq(items)) => {
+                    let mut values = Vec::with_capacity(items.len());
+                    for (index, child) in items.iter().enumerate() {
+                        let child_path = path.clone().with_index(index);
+                        let slot = node(item, Some(child), &child_path, errors);
+                        values.push(slot.into_option().unwrap_or(Json::Null));
+                    }
+                    Slot::Value(Json::Array(values))
+                }
+                Some(other) => {
+                    errors.push(ValidationError {
+                        path: path.to_string(),
+                        message: format!("expected a list, got {}", kind_of(other)),
+                    });
+                    Slot::Missing
+                }
+                None => {
+                    if field.required {
                         errors.push(ValidationError {
                             path: path.to_string(),
-                            message: String::from("optional without inner type"),
+                            message: String::from("required list missing"),
                         });
-                        Slot::Missing
                     }
-                },
+                    Slot::Missing
+                }
             }
         }
-        "list" => list(field, path, snapshot, errors),
-        _ => scalar(field, path, snapshot, errors),
+        _ => scalar(field, current, path, errors),
     }
-}
-
-fn list(field: &Field, path: &str, snapshot: &Snapshot, errors: &mut Vec<ValidationError>) -> Slot {
-    let Some(item) = field.items.as_deref() else {
-        errors.push(ValidationError {
-            path: path.to_string(),
-            message: String::from("list without item type"),
-        });
-        return Slot::Missing;
-    };
-
-    let prefix = format!("{path}[");
-    let mut indexed: Vec<(usize, String)> = Vec::new();
-    for key in snapshot.keys_with_prefix(&prefix) {
-        let Some(index) = key
-            .strip_prefix(&prefix)
-            .and_then(|rest| rest.strip_suffix(']'))
-            .and_then(|digits| digits.parse::<usize>().ok())
-        else {
-            continue;
-        };
-        indexed.push((index, key.to_string()));
-    }
-
-    if indexed.is_empty() {
-        if field.required {
-            errors.push(ValidationError {
-                path: path.to_string(),
-                message: String::from("required list missing"),
-            });
-        }
-        return Slot::Missing;
-    }
-
-    indexed.sort_by_key(|(index, _)| *index);
-    let mut values = Vec::with_capacity(indexed.len());
-    for (_, key) in indexed {
-        if let Some(value) = node(item, &key, snapshot, errors).into_option() {
-            values.push(value);
-        } else {
-            values.push(Json::Null);
-        }
-    }
-    Slot::Value(Json::Array(values))
 }
 
 fn scalar(
     field: &Field,
-    path: &str,
-    snapshot: &Snapshot,
+    current: Option<&Node>,
+    path: &Path,
     errors: &mut Vec<ValidationError>,
 ) -> Slot {
-    let Some(value) = snapshot.get(path) else {
+    let Some(node) = current else {
         if field.required {
             errors.push(ValidationError {
                 path: path.to_string(),
@@ -384,7 +380,18 @@ fn scalar(
         return Slot::Missing;
     };
 
-    match convert(field, value) {
+    if node.value == Value::Null {
+        if field.required {
+            errors.push(ValidationError {
+                path: path.to_string(),
+                message: String::from("required field is null"),
+            });
+            return Slot::Missing;
+        }
+        return Slot::Value(Json::Null);
+    }
+
+    match convert(field, &node.value) {
         Ok(json) => Slot::Value(json),
         Err(message) => {
             errors.push(ValidationError {
@@ -393,6 +400,17 @@ fn scalar(
             });
             Slot::Missing
         }
+    }
+}
+
+fn kind_of(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "a boolean",
+        Value::Int(_) | Value::Float(_) => "a number",
+        Value::Str(_) => "a string",
+        Value::Seq(_) => "a list",
+        Value::Map(_) => "an object",
     }
 }
 
@@ -405,7 +423,7 @@ fn convert(field: &Field, value: &Value) -> core::result::Result<Json, String> {
                 .parse::<i64>()
                 .map(Json::from)
                 .map_err(|_| format!("expected an integer, got {text:?}")),
-            other => Err(format!("expected an integer, got {other:?}")),
+            other => Err(format!("expected an integer, got {}", kind_of(other))),
         },
         "float" => match value {
             Value::Float(f) => Ok(Json::from(*f)),
@@ -418,14 +436,14 @@ fn convert(field: &Field, value: &Value) -> core::result::Result<Json, String> {
                 .and_then(serde_json::Number::from_f64)
                 .map(Json::Number)
                 .ok_or_else(|| format!("expected a number, got {text:?}")),
-            other => Err(format!("expected a number, got {other:?}")),
+            other => Err(format!("expected a number, got {}", kind_of(other))),
         },
         "bool" => match value {
             Value::Bool(b) => Ok(Json::Bool(*b)),
             Value::Str(text) => parse_bool(text)
                 .map(Json::Bool)
                 .ok_or_else(|| format!("expected a boolean, got {text:?}")),
-            other => Err(format!("expected a boolean, got {other:?}")),
+            other => Err(format!("expected a boolean, got {}", kind_of(other))),
         },
         other => Err(format!("unknown schema type: {other}")),
     }
@@ -525,6 +543,29 @@ fn collect_paths(
                     .or_default()
                     .push(path.to_string());
             }
+        }
+    }
+}
+
+/// Reports an unused subtree: leaves get their own entry so the suggestion is precise.
+fn report_unknown(node: &Node, path: &Path, known: &[String], out: &mut Vec<UnknownKey>) {
+    match &node.value {
+        Value::Map(entries) if !entries.is_empty() => {
+            for (key, child) in entries {
+                report_unknown(child, &path.clone().with_key(key.as_str()), known, out);
+            }
+        }
+        Value::Seq(items) if !items.is_empty() => {
+            for (index, child) in items.iter().enumerate() {
+                report_unknown(child, &path.clone().with_index(index), known, out);
+            }
+        }
+        _ => {
+            let rendered = path.to_string();
+            out.push(UnknownKey {
+                suggestion: best_suggestion(&rendered, known),
+                path: rendered,
+            });
         }
     }
 }

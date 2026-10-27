@@ -1,53 +1,43 @@
 //! YAML with spans, through `saphyr` (which bundles `marked_yaml`).
 
+use std::collections::BTreeMap;
+
 use saphyr::{LoadableYamlNode, MarkedYaml, Scalar, YamlData};
 
 use crate::error::{Error, Result};
-use crate::parse::join;
-use crate::source::RawEntry;
-use crate::value::{Span, Value};
+use crate::value::{Node, Span, Value};
 
-pub(super) fn parse(src: &str, file: &str) -> Result<Vec<RawEntry>> {
+pub(super) fn parse(src: &str, file: &str) -> Result<Vec<Node>> {
     let docs = MarkedYaml::load_from_str(src).map_err(|err| Error::Parse {
         file: file.to_string(),
         message: format!("{err:?}"),
     })?;
 
-    let mut out = Vec::new();
-    for doc in &docs {
-        visit(doc, "", file, &mut out);
-    }
-    Ok(out)
+    Ok(docs.iter().map(|doc| to_node(doc, file)).collect())
 }
 
-fn visit(node: &MarkedYaml<'_>, path: &str, file: &str, out: &mut Vec<RawEntry>) {
-    match &node.data {
+fn to_node(node: &MarkedYaml<'_>, file: &str) -> Node {
+    let span = Some(Span {
+        file: file.to_string(),
+        line: u32::try_from(node.span.start.line()).unwrap_or(u32::MAX),
+        col: u32::try_from(node.span.start.col()).unwrap_or(u32::MAX),
+    });
+
+    let value = match &node.data {
         YamlData::Mapping(mapping) => {
+            let mut entries = BTreeMap::new();
             for (key, value) in mapping.iter() {
-                let child = join(path, &key_of(&key.data));
-                visit(value, &child, file, out);
+                entries.insert(key_of(&key.data), to_node(value, file));
             }
+            Value::Map(entries)
         }
         YamlData::Sequence(sequence) => {
-            for (i, value) in sequence.iter().enumerate() {
-                visit(value, &format!("{path}[{i}]"), file, out);
-            }
+            Value::Seq(sequence.iter().map(|item| to_node(item, file)).collect())
         }
-        data => {
-            if path.is_empty() {
-                return;
-            }
-            out.push(RawEntry {
-                path: path.to_string(),
-                value: scalar_value(data),
-                span: Some(Span {
-                    file: file.to_string(),
-                    line: u32::try_from(node.span.start.line()).unwrap_or(u32::MAX),
-                    col: u32::try_from(node.span.start.col()).unwrap_or(u32::MAX),
-                }),
-            });
-        }
-    }
+        data => scalar_value(data),
+    };
+
+    Node::new(value, span)
 }
 
 fn key_of<'a>(data: &YamlData<'a, MarkedYaml<'a>>) -> String {

@@ -18,17 +18,26 @@ First functional release. `0.0.1` was only a name reservation.
   binding against the schema (`APP_DB_HOST` → `db.host` without `__`), and a warning for
   keys the schema does not use (`on_unknown`), with edit-distance suggestions.
 - **Profiles** through a file naming convention (`app-prod.yaml`).
-- **Secrets**: `Secret[T]` with a redacted representation and `*_FILE` indirection.
+- **Secrets**: `Secret[T]` with a redacted representation, opt-in `*_FILE`
+  indirection confined to `secret_root`, and redaction of declared keys in `explain`,
+  `items` and `dump`.
 - **`refresh()`** with atomic snapshot swap.
 - **CLI**: `python -m keydex explain|dump`.
-- **Wheels**: `abi3-py311` (3.11–3.15) and `cp314t` (real free-threading,
-  `gil_used = false`).
+- **Wheels**: `abi3-py311` (3.11–3.15) published; `cp314t` is built and tested in CI
+  (`gil_used = false`, GIL verified off) but not published until reads are lock-free.
 - Runnable example: [`examples/homelab-demo`](examples/homelab-demo/).
 - Architecture gates (`scripts/gate.sh`, `clippy.toml`) and ADRs
   [0006](docs/adr/0006-parsers-with-spans.md) and
   [0007](docs/adr/0007-schema-ir-over-serde.md).
 - Load benchmark: 1.26 ms for 1004 keys, 21× faster than OmegaConf
   ([details](docs/benchmarks.md)).
+
+### Fixed
+
+- Lists are replaced whole by a higher-priority source instead of merged by index: a base
+  `tags: [a, b]` plus a profile `tags: [c]` now yields `[c]`, and `tags: []` clears it.
+  The value model is a tree (`Value::Seq`/`Value::Map`), so a scalar can also replace a
+  whole subtree. Literal keys containing dots no longer collide with nested paths.
 
 ### Known limitations
 

@@ -1,4 +1,8 @@
 //! Parsers with spans.
+//!
+//! Every parser produces a [`Node`] tree: maps and sequences are structure, not key
+//! naming, so empty containers survive and a higher-priority source can replace a list
+//! whole.
 
 #[cfg(feature = "json")]
 mod json;
@@ -13,7 +17,7 @@ pub use lineindex::LineIndex;
 #[cfg(any(not(feature = "yaml"), not(feature = "toml"), not(feature = "json")))]
 use crate::error::Error;
 use crate::error::Result;
-use crate::source::RawEntry;
+use crate::value::Node;
 
 /// Supported document format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,11 +55,11 @@ impl Format {
     }
 }
 
-/// Parses a document and returns its flat entries, with spans.
+/// Parses a document and returns one tree per document (YAML can hold several).
 ///
 /// The format must be enabled by feature flag; otherwise
 /// [`Error::UnsupportedFormat`] is returned.
-pub fn parse(src: &str, file: &str, format: Format) -> Result<Vec<RawEntry>> {
+pub fn parse(src: &str, file: &str, format: Format) -> Result<Vec<Node>> {
     match format {
         Format::Yaml => {
             #[cfg(feature = "yaml")]
@@ -94,14 +98,5 @@ pub fn parse(src: &str, file: &str, format: Format) -> Result<Vec<RawEntry>> {
 fn unsupported(format: Format) -> Error {
     Error::UnsupportedFormat {
         format: format.as_str().to_string(),
-    }
-}
-
-/// Joins a path prefix with a key.
-pub(crate) fn join(prefix: &str, key: &str) -> String {
-    if prefix.is_empty() {
-        key.to_string()
-    } else {
-        format!("{prefix}.{key}")
     }
 }

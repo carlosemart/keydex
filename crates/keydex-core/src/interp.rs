@@ -7,7 +7,8 @@
 use std::collections::BTreeMap;
 
 use crate::error::{Error, Result};
-use crate::value::Value;
+use crate::source::{Segment, render_path};
+use crate::value::{Node, Value};
 
 /// Origin of a reference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -263,4 +264,73 @@ fn split_default(inner: &str) -> (&str, Option<&str>) {
     }
 
     (inner, None)
+}
+
+/// Resolves every `${...}` in the tree, in place.
+///
+/// Leaves are collected into a flat map, resolved once (with memoisation and cycle
+/// detection) and written back. Structural replacement already happened in the merge, so
+/// interpolation cannot resurrect or drop list items.
+pub(crate) fn resolve_tree(root: &mut Node, env: &BTreeMap<String, String>) -> Result<()> {
+    let mut raw = BTreeMap::new();
+    collect_leaves(root, &mut Vec::new(), &mut raw);
+
+    let (values, refs) = resolve_all(&raw, env)?;
+    apply_leaves(root, &mut Vec::new(), &values, &refs);
+    Ok(())
+}
+
+fn collect_leaves(node: &Node, segments: &mut Vec<Segment>, out: &mut BTreeMap<String, Value>) {
+    match &node.value {
+        Value::Map(entries) => {
+            for (key, child) in entries {
+                segments.push(Segment::Key(key.clone()));
+                collect_leaves(child, segments, out);
+                segments.pop();
+            }
+        }
+        Value::Seq(items) => {
+            for (index, child) in items.iter().enumerate() {
+                segments.push(Segment::Index(index));
+                collect_leaves(child, segments, out);
+                segments.pop();
+            }
+        }
+        value => {
+            out.insert(render_path(segments), value.clone());
+        }
+    }
+}
+
+fn apply_leaves(
+    node: &mut Node,
+    segments: &mut Vec<Segment>,
+    values: &BTreeMap<String, Value>,
+    refs: &BTreeMap<String, Vec<String>>,
+) {
+    match &mut node.value {
+        Value::Map(entries) => {
+            for (key, child) in entries.iter_mut() {
+                segments.push(Segment::Key(key.clone()));
+                apply_leaves(child, segments, values, refs);
+                segments.pop();
+            }
+            return;
+        }
+        Value::Seq(items) => {
+            for (index, child) in items.iter_mut().enumerate() {
+                segments.push(Segment::Index(index));
+                apply_leaves(child, segments, values, refs);
+                segments.pop();
+            }
+            return;
+        }
+        _ => {}
+    }
+
+    let key = render_path(segments);
+    if let Some(value) = values.get(&key) {
+        node.value = value.clone();
+    }
+    node.refs = refs.get(&key).cloned().unwrap_or_default();
 }

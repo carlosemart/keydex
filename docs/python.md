@@ -50,13 +50,19 @@ Known gaps in the type layer, so they do not surprise you:
 | `Decimal` from a YAML/JSON number | goes through text and can lose precision (`1.10` → `1.1`) |
 | `Secret[T]` with `T != str` | raises `TypeError` at load time |
 | `Optional[T]` with a dataclass default | the default is not applied: the field becomes `None` |
-| `list[T]` overridden by a profile | **index merge, not replacement** (see the warning below) |
 
-> **Warning — lists merge by index.** With `tags: [a, b]` in the base file and `tags: [c]`
-> in a profile, the result is `['c', 'b']`, because the engine stores flat keys
-> (`tags[0]`, `tags[1]`). Replacing a list with a shorter one leaves stale entries. This is
-> a known defect scheduled to be fixed before 0.1.0 is published; avoid partial list
-> overrides until then.
+## Lists, maps and precedence
+
+A higher-priority source **replaces** a list whole: `tags: [a, b]` in the base and
+`tags: [c]` in a profile gives `[c]`, and `tags: []` clears it. Maps merge key by key, and a
+scalar replaces the whole subtree (`db: disabled` drops any `db.host` from lower sources).
+
+A literal key that contains a dot is reachable with bracket quoting:
+
+```python
+cfg["a.b"]          # nested: a -> b
+cfg['["a.b"]']      # the literal key "a.b"
+```
 
 ## Environment binding
 
@@ -240,7 +246,6 @@ instead of mutating `os.environ`.
 
 ## What it does not do yet
 
-- List replacement (index merge today, see the warning above).
 - `imports:` / `includes:` between files.
 - Remote sources (Vault, S3, Consul) and `watch()`.
 - `pydantic`, `attrs` and `msgspec` models (dataclasses only for now).

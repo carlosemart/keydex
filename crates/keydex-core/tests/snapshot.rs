@@ -213,3 +213,59 @@ fn keys_without_the_prefix_are_ignored() {
     let cfg = snapshot();
     assert!(cfg.get("other").is_none());
 }
+
+fn build(base: &str, overlay: &str) -> keydex_core::Snapshot {
+    let mut builder = Builder::new();
+    builder
+        .document("base.yaml", base, Format::Yaml, Tier::BaseFile)
+        .unwrap();
+    builder
+        .document("prod.yaml", overlay, Format::Yaml, Tier::ProfileFile)
+        .unwrap();
+    builder.build().unwrap()
+}
+
+#[test]
+fn a_higher_priority_source_replaces_a_sequence() {
+    let cfg = build("tags:\n  - a\n  - b\n", "tags:\n  - c\n");
+    assert_eq!(
+        cfg.get("tags"),
+        Some(&Value::Seq(vec![])).map(|_| cfg.get("tags").unwrap())
+    );
+    assert_eq!(cfg.get("tags").unwrap().to_string(), "[c]");
+    assert_eq!(cfg.get("tags[1]"), None);
+}
+
+#[test]
+fn an_empty_sequence_clears_a_lower_one() {
+    let cfg = build("tags:\n  - a\n  - b\n", "tags: []\n");
+    assert_eq!(cfg.get("tags").unwrap().to_string(), "[]");
+    assert_eq!(cfg.get("tags[0]"), None);
+}
+
+#[test]
+fn a_scalar_replaces_a_mapping_subtree() {
+    let cfg = build("db:\n  host: localhost\n  port: 5432\n", "db: disabled\n");
+    assert_eq!(cfg.get("db"), Some(&Value::str("disabled")));
+    assert_eq!(cfg.get("db.host"), None);
+}
+
+#[test]
+fn a_mapping_replaces_a_lower_scalar() {
+    let cfg = build("db: disabled\n", "db:\n  host: localhost\n");
+    assert_eq!(cfg.get("db.host"), Some(&Value::str("localhost")));
+}
+
+#[test]
+fn a_literal_dotted_key_does_not_collide_with_a_nested_one() {
+    let cfg = build("\"a.b\": literal\na:\n  b: nested\n", "");
+    assert_eq!(cfg.get("a.b"), Some(&Value::str("nested")));
+    assert_eq!(cfg.get("[\"a.b\"]"), Some(&Value::str("literal")));
+}
+
+#[test]
+fn nested_lists_keep_their_structure() {
+    let cfg = build("m:\n  - [1, 2]\n  - [3]\n", "");
+    assert_eq!(cfg.get("m[0][1]"), Some(&Value::Int(2)));
+    assert_eq!(cfg.get("m[1][0]"), Some(&Value::Int(3)));
+}

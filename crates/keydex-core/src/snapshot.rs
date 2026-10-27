@@ -1,17 +1,7 @@
 //! Immutable snapshot with provenance.
 
-use std::collections::BTreeMap;
-
-use crate::value::{Provenance, Value};
-
-/// Resolved value with its full provenance.
-#[derive(Debug, Clone)]
-pub(crate) struct Resolved {
-    pub(crate) value: Value,
-    pub(crate) provenance: Provenance,
-    pub(crate) shadowed: Vec<Provenance>,
-    pub(crate) refs: Vec<String>,
-}
+use crate::source::{Path, Segment, render_path};
+use crate::value::{Node, Provenance, Value};
 
 /// Explanation of a key: the value and why it is that value.
 #[derive(Debug, Clone)]
@@ -30,68 +20,106 @@ pub struct Explanation {
 
 /// Resolved and immutable configuration.
 ///
-/// It is the only state shared between threads: no mutation, no locks. A future
-/// `refresh()` builds another snapshot and swaps the pointer.
+/// It holds the merged tree plus the list of leaf paths, so `keys()` is deterministic and
+/// cheap. It is the only state shared between threads.
 #[derive(Debug, Clone, Default)]
 pub struct Snapshot {
-    entries: BTreeMap<String, Resolved>,
+    root: Node,
+    leaves: Vec<String>,
 }
 
 impl Snapshot {
-    pub(crate) fn new(entries: BTreeMap<String, Resolved>) -> Self {
-        Self { entries }
+    pub(crate) fn new(root: Node) -> Self {
+        let mut leaves = Vec::new();
+        collect(&root, &mut Vec::new(), &mut leaves);
+        Self { root, leaves }
     }
 
-    /// Value of a key, when it exists.
+    pub(crate) fn root(&self) -> &Node {
+        &self.root
+    }
+
+    /// Node at a path, containers included.
+    #[must_use]
+    pub fn node(&self, key: &str) -> Option<&Node> {
+        navigate(&self.root, Path::parse(key).segments())
+    }
+
+    /// Value at a path, containers included.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&Value> {
-        self.entries.get(key).map(|entry| &entry.value)
+        self.node(key).map(|node| &node.value)
     }
 
-    /// Number of keys.
+    /// Number of leaf keys.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.leaves.len()
     }
 
-    /// `true` when there are no keys.
+    /// `true` when there are no leaf keys.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.leaves.is_empty()
     }
 
-    /// Keys in lexicographic order.
+    /// Leaf keys in lexicographic order.
     pub fn keys(&self) -> impl Iterator<Item = &str> {
-        self.entries.keys().map(String::as_str)
+        self.leaves.iter().map(String::as_str)
     }
 
-    /// Keys and values in lexicographic order.
+    /// Leaf keys and values in lexicographic order.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &Value)> {
-        self.entries
+        self.leaves
             .iter()
-            .map(|(key, entry)| (key.as_str(), &entry.value))
-    }
-
-    /// Keys starting with a prefix, in lexicographic order.
-    ///
-    /// Used to rebuild lists from the flattened keys (`servers[0]`, `servers[1]`, ...).
-    pub fn keys_with_prefix<'a>(&'a self, prefix: &str) -> impl Iterator<Item = &'a str> + 'a {
-        let start = prefix.to_string();
-        self.entries
-            .range(start.clone()..)
-            .take_while(move |(key, _)| key.starts_with(&start))
-            .map(|(key, _)| key.as_str())
+            .filter_map(|key| self.get(key).map(|value| (key.as_str(), value)))
     }
 
     /// Provenance of a key: who won, who was shadowed and which references it used.
     #[must_use]
     pub fn explain(&self, key: &str) -> Option<Explanation> {
-        self.entries.get(key).map(|entry| Explanation {
+        let node = self.node(key)?;
+        Some(Explanation {
             key: key.to_string(),
-            value: entry.value.clone(),
-            winner: entry.provenance.clone(),
-            shadowed: entry.shadowed.clone(),
-            refs: entry.refs.clone(),
+            value: node.value.clone(),
+            winner: node.provenance.clone()?,
+            shadowed: node.shadowed.clone(),
+            refs: node.refs.clone(),
         })
+    }
+}
+
+fn navigate<'a>(node: &'a Node, segments: &[Segment]) -> Option<&'a Node> {
+    let Some((head, rest)) = segments.split_first() else {
+        return Some(node);
+    };
+    match (head, &node.value) {
+        (Segment::Key(key), Value::Map(map)) => {
+            map.get(key).and_then(|child| navigate(child, rest))
+        }
+        (Segment::Index(index), Value::Seq(items)) => {
+            items.get(*index).and_then(|child| navigate(child, rest))
+        }
+        _ => None,
+    }
+}
+
+fn collect(node: &Node, segments: &mut Vec<Segment>, out: &mut Vec<String>) {
+    match &node.value {
+        Value::Map(entries) => {
+            for (key, child) in entries {
+                segments.push(Segment::Key(key.clone()));
+                collect(child, segments, out);
+                segments.pop();
+            }
+        }
+        Value::Seq(items) => {
+            for (index, child) in items.iter().enumerate() {
+                segments.push(Segment::Index(index));
+                collect(child, segments, out);
+                segments.pop();
+            }
+        }
+        _ => out.push(render_path(segments)),
     }
 }

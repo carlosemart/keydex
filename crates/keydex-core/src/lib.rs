@@ -38,6 +38,24 @@
 //! );
 //! ```
 //!
+//! A sequence in a higher-priority source replaces the whole sequence, because the value
+//! model is a tree:
+//!
+//! ```
+//! use keydex_core::{Builder, Format, Tier};
+//!
+//! let mut builder = Builder::new();
+//! builder
+//!     .document("base.yaml", "tags:\n  - a\n  - b\n", Format::Yaml, Tier::BaseFile)
+//!     .unwrap();
+//! builder
+//!     .document("prod.yaml", "tags:\n  - c\n", Format::Yaml, Tier::ProfileFile)
+//!     .unwrap();
+//!
+//! let snapshot = builder.build().unwrap();
+//! assert_eq!(snapshot.get("tags").unwrap().to_string(), "[c]");
+//! ```
+//!
 //! See `examples/basic.rs` and `examples/schema.rs` for complete programs.
 
 #![forbid(unsafe_code)]
@@ -55,6 +73,7 @@ mod env;
 mod error;
 mod interp;
 mod loader;
+mod merge;
 mod parse;
 #[cfg(feature = "schema")]
 mod schema;
@@ -69,8 +88,8 @@ pub use parse::{Format, LineIndex};
 #[cfg_attr(docsrs, doc(cfg(feature = "schema")))]
 pub use schema::{Field, IR_VERSION, Schema, UnknownKey, ValidationError, coerce, unknown_keys};
 pub use snapshot::{Explanation, Snapshot};
-pub use source::{RawEntry, RawSource, SourceId, Tier};
-pub use value::{Provenance, Span, Value};
+pub use source::{Path, Segment, SourceId, Tier};
+pub use value::{Node, Provenance, Span, Value};
 
 /// Version of the schema contract (`keydex.schema/v1`).
 ///

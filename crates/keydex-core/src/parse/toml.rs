@@ -2,92 +2,80 @@
 //!
 //! Note: `DocumentMut` drops spans; `Document` (formerly `ImDocument`) must be used.
 
+use std::collections::BTreeMap;
+
 use toml_edit::{Document, Item, Table, Value as TomlValue};
 
 use crate::error::{Error, Result};
-use crate::parse::{LineIndex, join};
-use crate::source::RawEntry;
-use crate::value::{Span, Value};
+use crate::parse::LineIndex;
+use crate::value::{Node, Span, Value};
 
-pub(super) fn parse(src: &str, file: &str) -> Result<Vec<RawEntry>> {
+pub(super) fn parse(src: &str, file: &str) -> Result<Vec<Node>> {
     let doc: Document<&str> = Document::parse(src).map_err(|err| Error::Parse {
         file: file.to_string(),
         message: err.to_string(),
     })?;
 
     let index = LineIndex::new(src);
-    let mut out = Vec::new();
-    walk_table(doc.as_table(), "", file, src, &index, &mut out);
-    Ok(out)
+    let root = table_to_node(doc.as_table(), file, src, &index);
+    Ok(vec![root])
 }
 
-fn walk_table(
-    table: &Table,
-    prefix: &str,
-    file: &str,
-    src: &str,
-    index: &LineIndex,
-    out: &mut Vec<RawEntry>,
-) {
+fn table_to_node(table: &Table, file: &str, src: &str, index: &LineIndex) -> Node {
+    let mut entries = BTreeMap::new();
     for (key, item) in table.iter() {
-        let path = join(prefix, key);
-        match item {
-            Item::Table(nested) => walk_table(nested, &path, file, src, index, out),
-            Item::ArrayOfTables(tables) => {
-                for (i, nested) in tables.iter().enumerate() {
-                    walk_table(nested, &format!("{path}[{i}]"), file, src, index, out);
-                }
-            }
-            Item::Value(value) => walk_value(value, &path, file, src, index, out),
-            Item::None => {}
-        }
+        entries.insert(key.to_string(), item_to_node(item, file, src, index));
+    }
+    Node::new(Value::Map(entries), None)
+}
+
+fn item_to_node(item: &Item, file: &str, src: &str, index: &LineIndex) -> Node {
+    match item {
+        Item::Table(table) => table_to_node(table, file, src, index),
+        Item::ArrayOfTables(tables) => Node::new(
+            Value::Seq(
+                tables
+                    .iter()
+                    .map(|table| table_to_node(table, file, src, index))
+                    .collect(),
+            ),
+            None,
+        ),
+        Item::Value(value) => value_to_node(value, file, src, index),
+        Item::None => Node::new(Value::Null, None),
     }
 }
 
-fn walk_value(
-    value: &TomlValue,
-    path: &str,
-    file: &str,
-    src: &str,
-    index: &LineIndex,
-    out: &mut Vec<RawEntry>,
-) {
-    match value {
-        TomlValue::Array(array) => {
-            for (i, item) in array.iter().enumerate() {
-                walk_value(item, &format!("{path}[{i}]"), file, src, index, out);
-            }
+fn value_to_node(value: &TomlValue, file: &str, src: &str, index: &LineIndex) -> Node {
+    let span = value.span().map(|range| {
+        let (line, col) = index.line_col(src, range.start);
+        Span {
+            file: file.to_string(),
+            line,
+            col,
         }
+    });
+
+    let value = match value {
+        TomlValue::Array(array) => Value::Seq(
+            array
+                .iter()
+                .map(|item| value_to_node(item, file, src, index))
+                .collect(),
+        ),
         TomlValue::InlineTable(table) => {
+            let mut entries = BTreeMap::new();
             for (key, item) in table.iter() {
-                walk_value(item, &format!("{path}.{key}"), file, src, index, out);
+                entries.insert(key.to_string(), value_to_node(item, file, src, index));
             }
+            Value::Map(entries)
         }
-        leaf => {
-            let span = leaf.span().map(|range| {
-                let (line, col) = index.line_col(src, range.start);
-                Span {
-                    file: file.to_string(),
-                    line,
-                    col,
-                }
-            });
-            out.push(RawEntry {
-                path: path.to_string(),
-                value: toml_value(leaf),
-                span,
-            });
-        }
-    }
-}
-
-fn toml_value(value: &TomlValue) -> Value {
-    match value {
         TomlValue::String(s) => Value::str(s.value().as_str()),
         TomlValue::Integer(i) => Value::Int(*i.value()),
         TomlValue::Float(f) => Value::Float(*f.value()),
         TomlValue::Boolean(b) => Value::Bool(*b.value()),
         TomlValue::Datetime(d) => Value::str(d.value().to_string()),
-        _ => Value::Null,
-    }
+    };
+
+    Node::new(value, span)
 }

@@ -303,7 +303,21 @@ fn to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> {
         Value::Int(i) => i.into_py_any(py)?,
         Value::Float(f) => f.into_py_any(py)?,
         Value::Str(s) => s.into_py_any(py)?,
-        // `Value` is `non_exhaustive`: a future value is exposed as `None` until this
+        Value::Seq(items) => {
+            let list = PyList::empty(py);
+            for item in items {
+                list.append(to_py(py, &item.value)?)?;
+            }
+            list.into_any().unbind()
+        }
+        Value::Map(entries) => {
+            let dict = PyDict::new(py);
+            for (key, child) in entries {
+                dict.set_item(key, to_py(py, &child.value)?)?;
+            }
+            dict.into_any().unbind()
+        }
+        // `Value` is `non_exhaustive`: a future variant is exposed as `None` until this
         // layer translates it.
         _ => py.None(),
     })

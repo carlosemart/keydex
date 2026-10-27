@@ -2,16 +2,16 @@
 
 use std::collections::BTreeMap;
 
-use crate::source::RawEntry;
+use crate::source::{Path, Segment};
 use crate::value::Value;
 
-/// Turns already captured environment variables into flat entries.
+/// Turns already captured environment variables into path/value pairs.
 ///
 /// **Dictionary mode** rules (no schema, see specification §6.2): the prefix is stripped
 /// case-insensitively, `__` separates levels and `_` is a literal character. No guessing:
 /// without a schema we do not infer.
 #[must_use]
-pub fn parse(env: &BTreeMap<String, String>, prefix: &str) -> Vec<RawEntry> {
+pub fn parse(env: &BTreeMap<String, String>, prefix: &str) -> Vec<(Path, Value)> {
     let wanted = prefix.to_ascii_uppercase();
     let mut out = Vec::new();
 
@@ -23,13 +23,15 @@ pub fn parse(env: &BTreeMap<String, String>, prefix: &str) -> Vec<RawEntry> {
         if rest.is_empty() {
             continue;
         }
-        out.push(RawEntry {
-            path: rest.to_ascii_lowercase().replace("__", "."),
-            value: Value::str(value.as_str()),
-            span: None,
-        });
+        let segments = rest
+            .to_ascii_lowercase()
+            .replace("__", ".")
+            .split('.')
+            .map(|key| Segment::Key(key.to_string()))
+            .collect();
+        out.push((Path::from_segments(segments), Value::str(value.as_str())));
     }
 
-    out.sort_by(|a, b| a.path.cmp(&b.path));
+    out.sort_by(|a, b| a.0.cmp(&b.0));
     out
 }

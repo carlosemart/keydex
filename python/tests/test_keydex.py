@@ -103,3 +103,43 @@ def test_parse_error_is_keydexerror(tmp_path: Path) -> None:
     path = write(tmp_path, "a: [unclosed\n")
     with pytest.raises(keydex.KeydexError):
         keydex.load_settings([path])
+
+
+def test_a_profile_replaces_a_list(tmp_path: Path) -> None:
+    base = write(tmp_path, "tags:\n  - a\n  - b\n")
+    write(tmp_path, "tags:\n  - c\n", name="app-prod.yaml")
+
+    cfg = keydex.load_settings(
+        files=[base], env_prefix="APP_", env={}, profiles=["prod"]
+    )
+    assert cfg["tags"] == ["c"]
+    assert "tags[1]" not in cfg
+
+
+def test_an_empty_list_clears_a_lower_one(tmp_path: Path) -> None:
+    base = write(tmp_path, "tags:\n  - a\n  - b\n")
+    write(tmp_path, "tags: []\n", name="app-prod.yaml")
+
+    cfg = keydex.load_settings(
+        files=[base], env_prefix="APP_", env={}, profiles=["prod"]
+    )
+    assert cfg["tags"] == []
+
+
+def test_a_scalar_replaces_a_map(tmp_path: Path) -> None:
+    base = write(tmp_path, "db:\n  host: localhost\n  port: 5432\n")
+    write(tmp_path, "db: disabled\n", name="app-prod.yaml")
+
+    cfg = keydex.load_settings(
+        files=[base], env_prefix="APP_", env={}, profiles=["prod"]
+    )
+    assert cfg["db"] == "disabled"
+    assert cfg.get("db.host") is None
+
+
+def test_a_literal_dotted_key_is_reachable(tmp_path: Path) -> None:
+    path = write(tmp_path, '"a.b": literal\na:\n  b: nested\n')
+    cfg = keydex.load_settings([path], env_prefix="APP_", env={})
+
+    assert cfg["a.b"] == "nested"
+    assert cfg['["a.b"]'] == "literal"

@@ -2,15 +2,16 @@
 //!
 //! `jiter` was discarded in spike 0001: it is faster but exposes no positions.
 
+use std::collections::BTreeMap;
+
 use jsonc_parser::ast::Value as JsonValue;
 use jsonc_parser::common::Ranged;
 
 use crate::error::{Error, Result};
-use crate::parse::{LineIndex, join};
-use crate::source::RawEntry;
-use crate::value::{Span, Value};
+use crate::parse::LineIndex;
+use crate::value::{Node, Span, Value};
 
-pub(super) fn parse(src: &str, file: &str) -> Result<Vec<RawEntry>> {
+pub(super) fn parse(src: &str, file: &str) -> Result<Vec<Node>> {
     let parsed = jsonc_parser::parse_to_ast(src, &Default::default(), &Default::default())
         .map_err(|err| Error::Parse {
             file: file.to_string(),
@@ -18,53 +19,49 @@ pub(super) fn parse(src: &str, file: &str) -> Result<Vec<RawEntry>> {
         })?;
 
     let index = LineIndex::new(src);
-    let mut out = Vec::new();
-    if let Some(root) = parsed.value.as_ref() {
-        walk(root, "", file, src, &index, &mut out);
-    }
-    Ok(out)
+    let root = parsed
+        .value
+        .as_ref()
+        .map(|value| to_node(value, file, src, &index))
+        .unwrap_or_else(Node::empty_map);
+
+    Ok(vec![root])
 }
 
-fn walk(
-    value: &JsonValue,
-    path: &str,
-    file: &str,
-    src: &str,
-    index: &LineIndex,
-    out: &mut Vec<RawEntry>,
-) {
-    match value {
+fn to_node(value: &JsonValue, file: &str, src: &str, index: &LineIndex) -> Node {
+    let range = value.range();
+    let (line, col) = index.line_col(src, range.start);
+    let span = Some(Span {
+        file: file.to_string(),
+        line,
+        col,
+    });
+
+    let value = match value {
         JsonValue::Object(object) => {
+            let mut entries = BTreeMap::new();
             for property in &object.properties {
-                let child = join(path, &property.name.clone().into_string());
-                walk(&property.value, &child, file, src, index, out);
+                entries.insert(
+                    property.name.clone().into_string(),
+                    to_node(&property.value, file, src, index),
+                );
             }
+            Value::Map(entries)
         }
-        JsonValue::Array(array) => {
-            for (i, item) in array.elements.iter().enumerate() {
-                walk(item, &format!("{path}[{i}]"), file, src, index, out);
-            }
-        }
-        leaf => {
-            if path.is_empty() {
-                return;
-            }
-            let range = leaf.range();
-            let (line, col) = index.line_col(src, range.start);
-            out.push(RawEntry {
-                path: path.to_string(),
-                value: json_value(leaf),
-                span: Some(Span {
-                    file: file.to_string(),
-                    line,
-                    col,
-                }),
-            });
-        }
-    }
+        JsonValue::Array(array) => Value::Seq(
+            array
+                .elements
+                .iter()
+                .map(|item| to_node(item, file, src, index))
+                .collect(),
+        ),
+        leaf => json_scalar(leaf),
+    };
+
+    Node::new(value, span)
 }
 
-fn json_value(value: &JsonValue) -> Value {
+fn json_scalar(value: &JsonValue) -> Value {
     match value {
         JsonValue::StringLit(s) => Value::str(s.value.to_string()),
         JsonValue::BooleanLit(b) => Value::Bool(b.value),

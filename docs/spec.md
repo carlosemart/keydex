@@ -279,11 +279,17 @@ A string that is exactly one placeholder inherits the type of the referenced val
 
 ## 9. Composition and merge
 
-### 9.1 Default rules (implemented)
+### 9.1 Default rules
 
-- Maps: deep merge.
-- Lists: **replacement** (like Spring), not concatenation.
+- Maps: deep merge, key by key.
+- Lists: **replacement** (like Spring). A shorter list drops the extra items, and `[]`
+  clears the lower one.
 - Scalars: the last one wins.
+- A scalar replaces a whole subtree: `db: disabled` drops `db.host` from lower sources.
+- A literal key containing a dot or a bracket cannot collide with a nested path: paths are
+  typed segments, and the flat form quotes such keys as `["a.b"]`.
+
+All of the above is implemented and covered by tests, including empty containers.
 
 ### 9.2 Intent markers *(planned)*
 

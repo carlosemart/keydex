@@ -5,18 +5,26 @@
 
 use std::collections::BTreeMap;
 
+use crate::Snapshot;
 use crate::env;
 use crate::error::Result;
 use crate::interp;
+use crate::merge::{insert, merge};
 use crate::parse::{self, Format};
-use crate::snapshot::{Resolved, Snapshot};
-use crate::source::{RawEntry, RawSource, SourceId, Tier};
-use crate::value::{Provenance, Value};
+use crate::source::{Path, SourceId, Tier};
+use crate::value::{Node, Provenance, Value};
+
+/// One source and the tree it produced.
+#[derive(Debug, Clone)]
+struct SourceTree {
+    id: SourceId,
+    root: Node,
+}
 
 /// Snapshot builder.
 #[derive(Debug, Default)]
 pub struct Builder {
-    sources: Vec<RawSource>,
+    sources: Vec<SourceTree>,
     env: BTreeMap<String, String>,
     next_order: u32,
 }
@@ -40,16 +48,23 @@ impl Builder {
 
     /// Adds an environment variable source.
     pub fn env_source(&mut self, prefix: &str, tier: Tier) -> &mut Self {
-        let entries = env::parse(&self.env, prefix);
         let order = self.take_order();
-        self.sources.push(RawSource {
-            id: SourceId {
-                name: String::from("env"),
+        let id = SourceId {
+            name: String::from("env"),
+            tier,
+            order,
+        };
+        let mut root = Node::empty_map();
+        for (path, value) in env::parse(&self.env, prefix) {
+            let provenance = Provenance {
+                source: id.name.clone(),
                 tier,
                 order,
-            },
-            entries,
-        });
+                span: None,
+            };
+            root = insert(root, path.segments(), value, provenance);
+        }
+        self.sources.push(SourceTree { id, root });
         self
     }
 
@@ -65,24 +80,28 @@ impl Builder {
         prefix: &str,
         tier: Tier,
     ) -> Result<&mut Self> {
-        let bindings = crate::schema::bind_env(&schema.root, &self.env, prefix)?;
-        let entries = bindings
-            .into_iter()
-            .map(|(path, value)| RawEntry {
-                path,
-                value: Value::str(value),
-                span: None,
-            })
-            .collect();
         let order = self.take_order();
-        self.sources.push(RawSource {
-            id: SourceId {
-                name: String::from("env"),
+        let id = SourceId {
+            name: String::from("env"),
+            tier,
+            order,
+        };
+        let mut root = Node::empty_map();
+        for (path, value) in crate::schema::bind_env(&schema.root, &self.env, prefix)? {
+            let provenance = Provenance {
+                source: id.name.clone(),
                 tier,
                 order,
-            },
-            entries,
-        });
+                span: None,
+            };
+            root = insert(
+                root,
+                Path::parse(&path).segments(),
+                Value::str(value),
+                provenance,
+            );
+        }
+        self.sources.push(SourceTree { id, root });
         Ok(self)
     }
 
@@ -94,16 +113,21 @@ impl Builder {
         format: Format,
         tier: Tier,
     ) -> Result<&mut Self> {
-        let entries = parse::parse(contents, name, format)?;
         let order = self.take_order();
-        self.sources.push(RawSource {
-            id: SourceId {
-                name: format!("file:{name}"),
-                tier,
-                order,
-            },
-            entries,
-        });
+        let id = SourceId {
+            name: format!("file:{name}"),
+            tier,
+            order,
+        };
+
+        let mut root = Node::empty_map();
+        for document in parse::parse(contents, name, format)? {
+            let mut document = document;
+            stamp(&mut document, &id);
+            root = merge(root, document);
+        }
+
+        self.sources.push(SourceTree { id, root });
         Ok(self)
     }
 
@@ -112,9 +136,8 @@ impl Builder {
         let Builder {
             mut sources, env, ..
         } = self;
-        // Sources are applied from LOWEST to HIGHEST priority: band descending (a high
-        // rank means less important) and, inside the band, order ascending. The last one
-        // to be applied wins.
+
+        // Lowest priority first: band descending, order ascending. The last one wins.
         sources.sort_by(|a, b| {
             b.id.tier
                 .rank()
@@ -122,55 +145,42 @@ impl Builder {
                 .then_with(|| a.id.order.cmp(&b.id.order))
         });
 
-        let mut merged: BTreeMap<String, (Value, Provenance, Vec<Provenance>)> = BTreeMap::new();
+        let mut root = Node::empty_map();
         for source in sources {
-            for entry in source.entries {
-                let provenance = Provenance {
-                    source: source.id.name.clone(),
-                    tier: source.id.tier,
-                    order: source.id.order,
-                    span: entry.span,
-                };
-                match merged.get_mut(&entry.path) {
-                    Some((value, winner, shadowed)) => {
-                        shadowed.push(winner.clone());
-                        *value = entry.value;
-                        *winner = provenance;
-                    }
-                    None => {
-                        merged.insert(entry.path, (entry.value, provenance, Vec::new()));
-                    }
-                }
-            }
+            root = merge(root, source.root);
         }
 
-        let raw: BTreeMap<String, Value> = merged
-            .iter()
-            .map(|(path, (value, _, _))| (path.clone(), value.clone()))
-            .collect();
-
-        let (values, refs) = interp::resolve_all(&raw, &env)?;
-
-        let mut entries = BTreeMap::new();
-        for (path, (_, provenance, shadowed)) in merged {
-            let Some(value) = values.get(&path).cloned() else {
-                continue;
-            };
-            let entry = Resolved {
-                value,
-                provenance,
-                shadowed,
-                refs: refs.get(&path).cloned().unwrap_or_default(),
-            };
-            entries.insert(path, entry);
-        }
-
-        Ok(Snapshot::new(entries))
+        interp::resolve_tree(&mut root, &env)?;
+        Ok(Snapshot::new(root))
     }
 
     fn take_order(&mut self) -> u32 {
         let order = self.next_order;
         self.next_order = self.next_order.saturating_add(1);
         order
+    }
+}
+
+/// Attaches the source's provenance to every node of the tree.
+fn stamp(node: &mut Node, id: &SourceId) {
+    node.provenance = Some(Provenance {
+        source: id.name.clone(),
+        tier: id.tier,
+        order: id.order,
+        span: node.span.clone(),
+    });
+
+    match &mut node.value {
+        Value::Map(entries) => {
+            for child in entries.values_mut() {
+                stamp(child, id);
+            }
+        }
+        Value::Seq(items) => {
+            for child in items.iter_mut() {
+                stamp(child, id);
+            }
+        }
+        _ => {}
     }
 }
