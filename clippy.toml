@@ -1,11 +1,12 @@
-# Regla 2 de AGENTS.md: keydex-core no lee entorno, reloj ni sistema de ficheros.
-# Se aplica con `deny(clippy::disallowed_methods)` en crates/keydex-core/src/lib.rs.
+# Hard rule 2 of AGENTS.md: keydex-core does not read the environment, the clock or the
+# filesystem. Enforced with `deny(clippy::disallowed_methods)` in
+# crates/keydex-core/src/lib.rs.
 disallowed-methods = [
-  { path = "std::env::var", reason = "el core no lee el entorno: inyecta EnvSource" },
-  { path = "std::env::var_os", reason = "el core no lee el entorno: inyecta EnvSource" },
-  { path = "std::env::vars", reason = "el core no lee el entorno: inyecta EnvSource" },
-  { path = "std::env::vars_os", reason = "el core no lee el entorno: inyecta EnvSource" },
-  { path = "std::time::SystemTime::now", reason = "el core no lee el reloj: inyecta Clock" },
-  { path = "std::fs::read", reason = "el core no lee el FS: inyecta FileProvider" },
-  { path = "std::fs::read_to_string", reason = "el core no lee el FS: inyecta FileProvider" },
+  { path = "std::env::var", reason = "the core does not read the environment: inject EnvSource" },
+  { path = "std::env::var_os", reason = "the core does not read the environment: inject EnvSource" },
+  { path = "std::env::vars", reason = "the core does not read the environment: inject EnvSource" },
+  { path = "std::env::vars_os", reason = "the core does not read the environment: inject EnvSource" },
+  { path = "std::time::SystemTime::now", reason = "the core does not read the clock: inject Clock" },
+  { path = "std::fs::read", reason = "the core does not read the filesystem: inject FileProvider" },
+  { path = "std::fs::read_to_string", reason = "the core does not read the filesystem: inject FileProvider" },
 ]

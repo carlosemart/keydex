@@ -1,0 +1,147 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag must match the workspace version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "keydex-core") | .version')
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match workspace version v${version}" >&2
+            exit 1
+          fi
+          echo "releasing ${GITHUB_REF_NAME}"
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip maturin
+      - run: maturin sdist --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  wheels:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target == 'aarch64' && 'aarch64-unknown-linux-gnu' || '' }}
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: "2_28"
+          args: --release --out dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: The wheel must contain what it claims
+        run: |
+          python -m zipfile -l dist/*.whl | tee wheel.txt
+          for path in keydex/__init__.py keydex/py.typed keydex/_keydex.pyi; do
+            grep -q "$path" wheel.txt || { echo "missing $path" >&2; exit 1; }
+          done
+          grep -Eq 'keydex/_keydex.*\.so' wheel.txt || { echo "missing the extension" >&2; exit 1; }
+      # Contents are checked for every wheel; only the native one can be imported here.
+      - name: The wheel must import
+        if: matrix.target == 'x86_64'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --no-index dist/*.whl
+          python -c "import keydex; print('keydex', keydex.__version__)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.target }}
+          path: dist/*.whl
+
+  wheels-freethreaded:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip maturin uv pytest
+      - run: uv python install 3.14t
+      - run: uv venv .venv-ft --python 3.14t
+      - run: maturin build --release --no-default-features --interpreter .venv-ft/bin/python --out dist-ft
+      - run: uv pip install --python .venv-ft/bin/python dist-ft/*.whl pytest
+      - name: The GIL must stay disabled
+        run: .venv-ft/bin/python -c "import sys, keydex; assert not sys._is_gil_enabled(), 'the module forces the GIL'"
+      - run: .venv-ft/bin/python -m pytest python/tests examples/homelab-demo/tests -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-freethreaded
+          path: dist-ft/*.whl
+
+  publish-pypi:
+    # `wheels-freethreaded` is a gate, not an upload: a build that breaks free-threading
+    # must not reach users, even though its wheel is not shipped.
+    needs: [verify, sdist, wheels, wheels-freethreaded]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # Trusted Publishing (OIDC); nothing else needs it
+    steps:
+      # Explicit artifacts, not a glob: the free-threaded wheel is built and tested but
+      # never uploaded, because its tag (`cp314t`) would become a permanent PyPI filename.
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-x86_64
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-aarch64
+          path: dist
+      - name: No free-threaded wheel may slip through
+        run: |
+          if ls dist/*cp314t* >/dev/null 2>&1; then
+            echo "a cp314t wheel reached the upload directory" >&2
+            exit 1
+          fi
+          ls -l dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  # After PyPI on purpose: if the Python release fails, crates.io is not touched. The
+  # reverse is still possible (a crates.io failure after a good PyPI upload), and is fixed
+  # by re-running this job.
+  publish-crates:
+    needs: [publish-pypi]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # The token goes through the environment, never through argv.
+      - run: cargo publish -p keydex-core --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

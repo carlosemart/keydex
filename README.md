@@ -1,48 +1,213 @@
 # keydex
 
-Acceso a configuración para Python: **tipado, explicable y rápido**, con el motor en Rust.
+Configuration access for Python: **typed, explainable and fast**, with the engine in Rust.
 
-> Estado: pre-alpha. `keydex 0.0.1` en PyPI solo reserva el nombre: todavía no hay
-> nada funcional. En crates.io la reserva de `keydex-core` está pendiente de verificar
-> el email de la cuenta.
+> Status: 0.1.0 in the repository, **not published**. What exists and what does not:
+> [docs/status.md](docs/status.md). Install from the repository for now.
 
-## La idea
+## Install
 
-```python
-cfg = keydex.load(AppConfig, profiles=["prod"])
-cfg.db.host                 # valor + tipo correctos, sin FFI por acceso
-cfg.explain("db.host")      # de dónde sale, quién lo sombreó y qué placeholders usó
-```
+There is no public release yet: PyPI only holds the `0.0.1` reservation. `0.1.0` is
+published by pushing the `v0.1.0` tag (see [release](docs/release.md)).
 
-Lo que aporta frente a `dynaconf`, `omegaconf` o `pydantic-settings`:
-
-- **Procedencia de primera clase**: cada valor sabe qué fuente, fichero y línea lo
-  definió. No es un mensaje de error: es una estructura consultable.
-- **Precedencia explícita** por bandas, con inserción relativa de fuentes nuevas.
-- **Relaxed binding** resuelto contra el esquema, no por heurísticas.
-- **Sin `eval`**: interpolación de referencias y resolvers puros, nada de expresiones.
-- **Rendimiento**: el parseo, el merge y la interpolación ocurren una vez en Rust; los
-  accesos son Python nativo.
-
-## Qué no es
-
-Un contenedor de inyección de dependencias, un motor de expresiones, un framework de
-aplicación, ni una capa de bindings multi-lenguaje. Ver `AGENTS.md`.
-
-## Documentación
-
-- [Especificación](docs/spec.md)
-- [Decisiones de arquitectura](docs/adr/)
-- [Instrucciones para agentes](AGENTS.md)
-
-## Desarrollo
+In the meantime, from the repository:
 
 ```bash
-./scripts/check.sh     # fmt + clippy
-cargo test --workspace
-./scripts/gate.sh      # invariantes de arquitectura
+uv venv
+uv pip install -e .
 ```
 
-## Licencia
+The wheel matrix is `abi3` for Python 3.11–3.15 plus a `cp314t` build for free-threading;
+none of them is published yet.
 
-MIT OR Apache-2.0, a elección del usuario.
+## Usage
+
+```python
+from dataclasses import dataclass, field
+import keydex
+
+@dataclass(frozen=True)
+class Db:
+    host: str
+    port: int = 5432
+
+@dataclass(frozen=True)
+class App:
+    db: Db
+    debug: bool = False
+    tags: list[str] = field(default_factory=list)
+
+# Typed: validates, coerces and returns the model
+cfg = keydex.load(App, files=["config/app.yaml"], env_prefix="APP_")
+cfg.db.port        # a real int, not "5432"
+
+# Dictionary mode: no model, with provenance
+raw = keydex.load_settings(files=["config/app.yaml"], env_prefix="APP_")
+raw["db.host"]
+raw.explain("db.host")
+```
+
+`APP_DB_HOST` matches `db.host` without needing `__`: the schema disambiguates.
+
+Precedence, as implemented: **environment (2) > profile file (3) > base file (4) > code
+defaults (6)**. The other bands in the specification are design, not code.
+
+Errors are aggregated instead of failing on the first one:
+
+```python
+try:
+    keydex.load(App, files=["config/app.yaml"], env_prefix="APP_")
+except keydex.ValidationError as error:
+    error.errors
+    # [{"path": "db.port", "message": "expected an integer, got \"many\""}]
+```
+
+Keys that no model field uses produce a warning with a suggestion:
+
+```
+UnknownKeyWarning: db.prot: unknown key, did you mean "db.port"?
+```
+
+Controlled with `on_unknown="warn" | "error" | "ignore"`. It is the safety net against
+the quietest failure: a misspelled override that never applies.
+
+The `explain` output is a structure, not text:
+
+```python
+{
+  "key": "db.host",
+  "value": "env.internal",
+  "redacted": false,
+  "winner": {"source": "env", "tier": 2, "file": None, "line": None, "col": None},
+  "shadowed": [
+    {"source": "file:config/app.yaml", "tier": 4,
+     "file": "config/app.yaml", "line": 2, "col": 8}
+  ],
+  "refs": [],
+}
+```
+
+## Profiles
+
+```python
+# app.yaml + app-prod.yaml (same directory, suffixed name)
+cfg = keydex.load(App, files=["config/app.yaml"], profiles=["prod"])
+```
+
+The profile is applied in the `ProfileFile` band, above the base file. A missing profile
+file is ignored; with several profiles the last one wins.
+
+## Secrets
+
+```python
+from keydex import Secret
+
+@dataclass(frozen=True)
+class Db:
+    password: Secret[str]
+
+cfg.db.password            # Secret('***')
+cfg.db.password.reveal()   # the real value
+```
+
+`repr`, `str` and any log of the dataclass show `***`. Docker/K8s indirection is opt-in
+and confined to a directory you choose:
+
+```bash
+APP_DB__PASSWORD_FILE=/run/secrets/db_password
+```
+
+```python
+keydex.load(
+    App,
+    files=["app.yaml"],
+    env_prefix="APP_",          # without a prefix the process environment is not read
+    secret_files=True,
+    secret_root="/run/secrets",
+)
+```
+
+Without `secret_files=True` no file is read; a path outside `secret_root` raises
+`KeydexError`. The prefix is not optional here: with no prefix and no `env=`, no
+environment variable is read at all.
+
+## Reload
+
+```python
+cfg = keydex.load_settings(files=["app.yaml"])
+cfg.refresh()      # re-reads; if it fails the current snapshot is kept
+```
+
+## CLI
+
+```bash
+python -m keydex explain db.host --files config/app.yaml --env-prefix APP_
+python -m keydex dump --files config/app.yaml
+```
+
+## Why
+
+```python
+cfg = keydex.load(App, files=["config/app.yaml"], profiles=["prod"])
+cfg.db.host                 # right value, right type, no FFI per access
+
+raw = keydex.load_settings(files=["config/app.yaml"], profiles=["prod"])
+raw.explain("db.host")      # where it comes from, who shadowed it, what it used
+```
+
+Provenance lives in `Settings` (dictionary mode), not in the typed model: `load` returns
+your dataclass. The two calls build the same snapshot from the same sources.
+
+What it adds over `dynaconf`, `omegaconf` or `pydantic-settings`:
+
+- **First-class provenance**: every value knows which source, file and line defined it.
+  It is not an error message, it is a queryable structure.
+- **Explicit precedence** by bands, with relative insertion of new sources.
+- **Relaxed binding** resolved against the schema, not by heuristics.
+- **No `eval`**: reference interpolation and pure resolvers, no expressions.
+- **Performance**: parsing, merging and interpolation happen once in Rust; access is
+  native Python.
+
+## What it is not
+
+A dependency injection container, an expression engine, an application framework or a
+multi-language binding layer. See `AGENTS.md`.
+
+## Documentation
+
+- [Install](docs/install.md)
+- [Python guide](docs/python.md)
+- [Rust guide](docs/rust.md)
+- [Architecture](docs/architecture.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Status: what exists and what does not](docs/status.md)
+- [Specification](docs/spec.md)
+- [Agent instructions](AGENTS.md)
+- [Runnable example: homelab service](examples/homelab-demo/)
+
+The published site is built from `docs/` with mkdocs-material and mkdocstrings
+(`mkdocs build --strict`); the Rust side is rustdoc, with two runnable examples:
+
+```bash
+./scripts/docs.sh          # builds both: site/ and target/doc/
+./scripts/docs.sh serve    # live preview on http://127.0.0.1:8000
+./scripts/docs.sh rust     # Rust API docs in the browser
+
+cargo run -p keydex-core --example basic
+cargo run -p keydex-core --example schema
+```
+
+## Development
+
+```bash
+mise run ci        # fmt, clippy, Rust tests, gate, Python tests
+mise run docs      # build the docs site and the Rust API
+```
+
+Tasks live in `mise.toml` and delegate to `scripts/`, which run without any task runner.
+`scripts/gate.sh` warns and skips `cargo deny` when it is not installed; for CI parity:
+`cargo install cargo-deny --locked`.
+
+## License
+
+MIT OR Apache-2.0, at your option.

@@ -1,18 +1,66 @@
 //! # keydex-core
 //!
-//! Motor de configuración de `keydex`: fuentes, precedencia, merge, interpolación,
-//! coerción y procedencia.
+//! keydex configuration engine: sources, precedence, merge, interpolation, coercion and
+//! provenance.
 //!
-//! Este crate es Rust puro y se publica en crates.io. Reglas duras (ver `AGENTS.md`):
+//! This crate is pure Rust and is published on crates.io. Hard rules (see `AGENTS.md`):
 //!
-//! - **No** depende de `pyo3`.
-//! - **No** lee entorno, reloj ni sistema de ficheros: todo entra inyectado
-//!   (`EnvSource`, `FileProvider`, `Clock`).
-//! - Los errores son enums, nunca `String`.
-//! - Cero estado global mutable.
+//! - It does **not** depend on `pyo3`.
+//! - It does **not** read the environment, the clock or the filesystem: everything is
+//!   injected.
+//! - Errors are enums, never `String`.
+//! - No mutable global state.
+//!
+//! # Example
+//!
+//! ```
+//! use keydex_core::{Builder, Format, Tier};
+//!
+//! let mut builder = Builder::new();
+//! builder
+//!     .document(
+//!         "app.yaml",
+//!         "db:\n  host: localhost\n  port: 5432\n  url: \"${db.host}:${db.port}\"\n",
+//!         Format::Yaml,
+//!         Tier::BaseFile,
+//!     )
+//!     .unwrap();
+//!
+//! let snapshot = builder.build().unwrap();
+//!
+//! assert_eq!(snapshot.get("db.host").unwrap().to_string(), "localhost");
+//! // Interpolation is resolved once, at build time.
+//! assert_eq!(snapshot.get("db.url").unwrap().to_string(), "localhost:5432");
+//! // Every value knows where it came from.
+//! assert_eq!(
+//!     snapshot.explain("db.host").unwrap().winner.source,
+//!     "file:app.yaml"
+//! );
+//! ```
+//!
+//! A sequence in a higher-priority source replaces the whole sequence, because the value
+//! model is a tree:
+//!
+//! ```
+//! use keydex_core::{Builder, Format, Tier};
+//!
+//! let mut builder = Builder::new();
+//! builder
+//!     .document("base.yaml", "tags:\n  - a\n  - b\n", Format::Yaml, Tier::BaseFile)
+//!     .unwrap();
+//! builder
+//!     .document("prod.yaml", "tags:\n  - c\n", Format::Yaml, Tier::ProfileFile)
+//!     .unwrap();
+//!
+//! let snapshot = builder.build().unwrap();
+//! assert_eq!(snapshot.get("tags").unwrap().to_string(), "[c]");
+//! ```
+//!
+//! See `examples/basic.rs` and `examples/schema.rs` for complete programs.
 
 #![forbid(unsafe_code)]
 #![forbid(static_mut_refs)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(
     missing_docs,
     clippy::panic,
@@ -21,84 +69,35 @@
     clippy::disallowed_methods
 )]
 
-/// Versión del contrato del esquema (`keydex.schema/v1`).
+mod env;
+mod error;
+mod interp;
+mod loader;
+mod merge;
+mod parse;
+mod resolve;
+#[cfg(feature = "schema")]
+mod schema;
+mod snapshot;
+mod source;
+mod value;
+mod walk;
+
+pub use error::{Error, Result};
+pub use loader::Builder;
+pub use parse::{Format, LineIndex};
+pub use resolve::{EnvResolver, ResolveError, Resolver, Resolvers};
+#[cfg(feature = "schema")]
+#[cfg_attr(docsrs, doc(cfg(feature = "schema")))]
+pub use schema::{
+    Coerced, Field, IR_VERSION, Schema, UnknownKey, ValidationError, coerce, unknown_keys,
+};
+pub use snapshot::{Explanation, Snapshot};
+pub use source::{ParsedSource, Path, Segment, Source, SourceId, Tier};
+pub use value::{Node, Provenance, Span, Value};
+
+/// Version of the schema contract (`keydex.schema/v1`).
 ///
-/// El IR se versiona de forma independiente a la versión del paquete: sobrevive a
-/// varias releases y solo cambia ante una ruptura del contrato.
+/// The IR is versioned independently from the package: it survives several releases and
+/// only changes when the contract breaks.
 pub const SCHEMA_IR_VERSION: &str = "keydex.schema/v1";
-
-/// Banda de precedencia de un origen de configuración.
-///
-/// De mayor a menor prioridad. Dentro de una misma banda decide el orden de
-/// inserción de la fuente: la última en aplicarse gana.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(u8)]
-#[non_exhaustive]
-pub enum Tier {
-    /// Overrides de test o programáticos.
-    Override = 0,
-    /// Argumentos de línea de comandos.
-    Cli = 1,
-    /// Variables de entorno del sistema.
-    Environment = 2,
-    /// Ficheros del perfil activo.
-    ProfileFile = 3,
-    /// Ficheros base.
-    BaseFile = 4,
-    /// Defaults declarados en el esquema.
-    SchemaDefault = 5,
-    /// Defaults declarados en el código.
-    CodeDefault = 6,
-}
-
-impl Tier {
-    /// Número de banda. Menor es más prioritario.
-    #[must_use]
-    pub const fn rank(self) -> u8 {
-        self as u8
-    }
-}
-
-/// Error del motor.
-///
-/// Todos los errores son estructurados: cada capa los formatea (excepción en
-/// Python, JSON en la CLI). Nunca se devuelve un `String` como error.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
-    /// Una fuente declarada no existe o no se puede leer.
-    #[error("origen no disponible: {name}")]
-    SourceUnavailable {
-        /// Nombre lógico del origen.
-        name: String,
-    },
-
-    /// El binding de una variable de entorno es ambiguo contra el esquema.
-    #[error("binding ambiguo para la variable {env_var}: {candidates:?}")]
-    AmbiguousBinding {
-        /// Variable de entorno implicada.
-        env_var: String,
-        /// Rutas del esquema que empatan.
-        candidates: Vec<String>,
-    },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn la_version_del_ir_es_v1() {
-        assert_eq!(SCHEMA_IR_VERSION, "keydex.schema/v1");
-    }
-
-    #[test]
-    fn las_bandas_estan_ordenadas_por_prioridad() {
-        assert!(Tier::Override < Tier::Cli);
-        assert!(Tier::Cli < Tier::Environment);
-        assert!(Tier::Environment < Tier::ProfileFile);
-        assert!(Tier::ProfileFile < Tier::BaseFile);
-        assert_eq!(Tier::Override.rank(), 0);
-        assert_eq!(Tier::CodeDefault.rank(), 6);
-    }
-}

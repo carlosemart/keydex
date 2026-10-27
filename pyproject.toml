@@ -1,0 +1,33 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "keydex"
+dynamic = ["version"]
+description = "Typed, explainable configuration access for Python, with the engine in Rust."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+authors = [{ name = "Carlos Espinaco", email = "spi101@gmail.com" }]
+keywords = ["configuration", "config", "settings", "environment", "pydantic"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Rust",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/carlosemart/keydex"
+Repository = "https://github.com/carlosemart/keydex"
+Issues = "https://github.com/carlosemart/keydex/issues"
+
+[tool.maturin]
+python-source = "python"
+module-name = "keydex._keydex"
+manifest-path = "crates/keydex-py/Cargo.toml"
+strip = true
+# Never ship build leftovers from an editable install.
+exclude = ["**/__pycache__/**", "**/*.pyc"]

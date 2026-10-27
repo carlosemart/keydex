@@ -1,0 +1,51 @@
+site_name: keydex
+site_description: Typed, explainable configuration access for Python, with the engine in Rust.
+docs_dir: docs
+site_dir: site
+strict: true
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Install: install.md
+  - Python guide: python.md
+  - Rust guide: rust.md
+  - Architecture: architecture.md
+  - Reference:
+      - Key syntax: reference/keys.md
+      - Interpolation: reference/interpolation.md
+  - API reference: api.md
+  - Troubleshooting: troubleshooting.md
+  - Coming from another library: migration.md
+  - Status: status.md
+  - Specification: spec.md
+  - Benchmarks: benchmarks.md
+  - Contributing: contributing.md
+  - Release: release.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [python]
+          options:
+            docstring_style: google
+            show_source: true
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: true
+            members_order: source
+            filters: ["!^_"]
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true

@@ -20,14 +20,15 @@ jobs:
         with:
           components: clippy, rustfmt
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets --exclude keydex-py -- -D warnings
+      - run: cargo check -p keydex-py
 
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --workspace
+      - run: cargo test --workspace --exclude keydex-py
 
   gate:
     runs-on: ubuntu-latest
@@ -37,4 +38,50 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
+      - name: The gate must fail on a violation
+        run: ./scripts/gate.sh --self-test
       - run: ./scripts/gate.sh
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip maturin pytest
+      - run: maturin build --release --out dist
+      - run: python -m pip install dist/*.whl
+      - run: python -m pytest python/tests examples/homelab-demo/tests -q
+
+  python-freethreaded:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip maturin uv pytest
+      - run: uv python install 3.14t
+      - run: uv venv .venv-ft --python 3.14t
+      - run: maturin build --release --no-default-features --interpreter .venv-ft/bin/python --out dist-ft
+      - run: uv pip install --python .venv-ft/bin/python dist-ft/*.whl pytest
+      - name: The GIL must stay disabled
+        run: .venv-ft/bin/python -c "import sys, keydex; assert not sys._is_gil_enabled(), 'the module forces the GIL'"
+      - run: .venv-ft/bin/python -m pytest python/tests examples/homelab-demo/tests -q
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Rustdoc must be warning-free
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features -p keydex-core
+      - run: python -m pip install --upgrade pip mkdocs-material "mkdocstrings[python]" ruff
+      - name: Documentation must build strictly
+        run: mkdocs build --strict

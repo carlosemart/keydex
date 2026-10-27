@@ -1,57 +1,85 @@
-# keydex — instrucciones del proyecto
+# keydex — project instructions
 
-Especificación: `docs/spec.md`. Decisiones: `docs/adr/`. Léelos antes de tocar
-`crates/`. Si el código y la spec discrepan, gana la spec: pregunta antes de cambiarla.
+Specification: `docs/spec.md`. Architecture: `docs/architecture.md`. Read them before
+touching `crates/`. If code and spec disagree, the spec wins: ask before changing it.
 
-## Qué es keydex
+## What keydex is
 
-Acceso a configuración: tipado, con procedencia y rápido. Pides una clave, recibes el
-valor correcto, del origen correcto, con el tipo correcto, y puedes preguntar por qué.
+Configuration access: typed, with provenance, and fast. You ask for a key, you get the
+right value, from the right origin, with the right type, and you can ask why.
 
-## Qué NO es (no lo añadas aunque parezca útil)
+## What it is NOT (do not add it even if it looks useful)
 
-Contenedor DI · motor de expresiones · framework de aplicación · FFI multi-lenguaje ·
-hot reload por defecto · validación en Python.
+DI container · expression engine · application framework · multi-language FFI · hot reload
+by default · validation in Python.
 
-## Reglas duras
+## Hard rules
 
-1. `keydex-core` NO depende de `pyo3`.           → `just gate`
-2. `keydex-core` NO lee entorno, reloj ni FS.    → `just gate` + clippy
-3. Errores = enums `thiserror`. Nunca `String`.  → clippy `panic`/`unwrap_used`
-4. Cero estado global mutable; caches con `RwLock`.
-5. Ningún acceso a atributo cruza FFI; solo `build` y `refresh`.
-6. Toda clave expuesta en `explain` conserva su span.
+1. `keydex-core` does NOT depend on `pyo3`.      → `./scripts/gate.sh`
+2. `keydex-core` does NOT read environment, clock or FS. → `./scripts/gate.sh` + clippy
+3. Errors are `thiserror` enums. Never `String`. → clippy `panic`/`unwrap_used`
+4. No mutable global state; caches behind `RwLock`.
+5. No attribute access crosses FFI; only `build` and `refresh`.
+6. Every key exposed in `explain` keeps its span.
 
-## Prohibiciones
+## Prohibitions
 
-- No `serde_yaml` ni `serde_yml` (archivados, sin spans): usa `saphyr`/`marked_yaml`.
-- No `unwrap`/`expect`/`panic` fuera de `#[cfg(test)]`.
-- No dependencias nuevas sin ADR y `cargo deny`.
-- No cambiar `keydex.schema/v1` sin bump, fixture compartido y test cruzado.
-- No `eval`, no red, no lectura de ficheros arbitrarios desde un resolver.
+- No `serde_yaml` or `serde_yml` (archived, no spans): use `saphyr`/`marked_yaml`.
+- No `unwrap`/`expect`/`panic` outside `#[cfg(test)]`.
+- No new dependency without an ADR and `cargo deny`.
+- No change to `keydex.schema/v1` without a bump, a shared fixture and a cross test.
+- No `eval`, no network, no arbitrary file reads from a resolver.
 
-## Mapa
-
-```
-crates/keydex-core  motor puro: fuentes, precedencia, merge, interp, coerción
-crates/keydex-py    binding PyO3 (F1), publish = false
-python/keydex       API pública, tipos e integraciones (F1)
-docs/spec.md        especificación vigente
-docs/adr/           decisiones irreversibles
-```
-
-## Comandos
+## Map
 
 ```
-./scripts/check.sh     # fmt + clippy -D warnings
-cargo test --workspace
-./scripts/gate.sh      # invariantes de arquitectura (reglas 1 y 2)
+crates/keydex-core  pure engine: sources, precedence, merge, interp, coercion
+crates/keydex-py    PyO3 binding (F1), publish = false
+python/keydex       public API, types and integrations (F1)
+docs/spec.md        current specification
+docs/architecture.md  how the pieces fit, and why (read before refactors)
 ```
 
-## Terminado cuando
+## Commands
 
-- [ ] hay un test que falla sin el cambio
-- [ ] `just check`, `just gate` y `just test` en verde
-- [ ] sin regresión de rendimiento cuando exista banco de pruebas
-- [ ] `docs/spec.md` actualizado si cambió el comportamiento
-- [ ] entrada en `CHANGELOG.md`
+```
+mise run check   # fmt + clippy -D warnings
+mise run test    # cargo test for keydex-core
+mise run gate    # architecture invariants (hard rules 1 and 2)
+mise run ci      # everything a pull request needs
+```
+
+Documentation:
+
+```
+mise run docs        # build site/ (mkdocs) and target/doc/ (rustdoc)
+mise run docs:serve  # live preview on http://127.0.0.1:8000
+```
+
+Tasks are defined in `mise.toml` and delegate to `scripts/`, which stay runnable without
+any task runner.
+
+## Docs rules
+
+- Public Rust items need doc comments (`missing_docs` is denied) and intra-doc links.
+- Public Python API needs Google-style docstrings (Args/Returns/Raises).
+- Every example in `docs/` must be runnable; the Rust ones live in `crates/keydex-core/examples/`.
+- A behaviour change updates `docs/spec.md` in the same PR.
+
+## Git
+
+- **Never `git push` to `main`.** It is protected: branch plus PR, always.
+- One branch per change: `feat/…`, `fix/…`, `docs/…`, `chore/…`.
+- Before opening the PR: `./scripts/check.sh`, `cargo test --workspace --exclude
+  keydex-py` and `python -m pytest python/tests examples/homelab-demo/tests`.
+- Do not rewrite shared history (`--force`) and do not publish (tag, PyPI, crates.io)
+  without explicit user approval.
+
+## Done when
+
+- [ ] there is a test that fails without the change
+- [ ] `mise run check` and `mise run gate` are green, and `mise run test` passes
+- [ ] `mise run docs` passes if docstrings or `docs/` changed
+- [ ] no performance regression once a benchmark exists
+- [ ] `docs/spec.md` updated if behaviour changed
+- [ ] entry in `CHANGELOG.md`

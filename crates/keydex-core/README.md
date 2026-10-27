@@ -1,18 +1,18 @@
 # keydex-core
 
-Motor de configuración de [keydex](https://github.com/carlosemart/keydex):
-fuentes, precedencia, merge, interpolación, coerción y procedencia.
+Configuration engine of [keydex](https://github.com/carlosemart/keydex): sources,
+precedence, merge, interpolation, coercion and provenance.
 
-Rust puro, sin dependencia de Python. Pensado para embeber en servicios Rust y
-para servir de núcleo a la librería de Python.
+Pure Rust, with no Python dependency. Meant to be embedded in Rust services and to serve as
+the core of the Python library.
 
-## Invariantes
+## Invariants
 
-- No depende de `pyo3`.
-- No lee entorno, reloj ni sistema de ficheros: todo entra inyectado.
-- Errores estructurados (enums), nunca `String`.
-- Cero estado global mutable.
+- Does not depend on `pyo3`.
+- Does not read the environment, the clock or the filesystem: everything is injected.
+- Structured errors (enums), never `String`.
+- No mutable global state.
 
-## Estado
+## Status
 
-Pre-alpha. La API pública todavía no es estable.
+Pre-release. The public API is not stable yet.

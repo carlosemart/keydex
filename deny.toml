@@ -4,13 +4,24 @@ yanked = "warn"
 
 [licenses]
 version = 2
-allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib"]
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+]
+# Do not fail because an allowed license does not appear in the tree today.
+unused-allowed-license = "allow"
 
 [bans]
 multiple-versions = "warn"
 deny = [
-  { name = "serde_yaml", reason = "archivado y no conserva spans; usa saphyr/marked_yaml" },
-  { name = "serde_yml", reason = "fork abandonado de serde_yaml" },
+  { name = "serde_yaml", reason = "archived and keeps no spans; use saphyr/marked_yaml" },
+  { name = "serde_yml", reason = "abandoned fork of serde_yaml" },
 ]
 
 [sources]

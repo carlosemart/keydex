@@ -1,0 +1,27 @@
+[package]
+name = "keydex-py"
+description = "Python (PyO3) binding for keydex. Not published on crates.io."
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[lib]
+name = "_keydex"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# One wheel covers 3.11–3.15 with the GIL. For a free-threaded build `abi3` does not
+# apply: compile with `--no-default-features`.
+default = ["abi3"]
+abi3 = ["pyo3/abi3-py311"]
+
+[dependencies]
+keydex-core = { path = "../keydex-core", version = "0.1.0" }
+arc-swap = "1"
+pyo3 = { version = "0.30", features = ["extension-module"] }
+serde_json = "1"
