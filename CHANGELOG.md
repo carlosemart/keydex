@@ -30,6 +30,9 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - Ejemplo ejecutable [`examples/homelab-demo`](examples/homelab-demo/): perfiles
   dev/prod, secretos por fichero, interpolación resuelta tras el merge y arranque que
   falla con la ruta exacta si la configuración no valida.
+- **F3.1**: detección de claves que el esquema no usa (`on_unknown` = `warn` por
+  defecto, `error` o `ignore`), con sugerencia por distancia de edición. Cierra el
+  agujero más silencioso encontrado al probar la demo.
 
 ## [0.0.1] - 2026-10-27
 

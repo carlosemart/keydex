@@ -16,6 +16,7 @@ use std::sync::{Arc, RwLock};
 
 use keydex_core::{
     Builder, Error, Explanation, Format, Provenance, Schema, Snapshot, Tier, Value, coerce,
+    unknown_keys,
 };
 use pyo3::IntoPyObjectExt;
 use pyo3::create_exception;
@@ -143,11 +144,11 @@ fn load(
 }
 
 #[pyfunction]
-#[pyo3(signature = (ir, files, env_prefix = "", env = None, profiles = Vec::new()))]
+#[pyo3(signature = (ir, files, env_prefix = "", env = None, profiles = Vec::new(), on_unknown = "warn"))]
 /// Carga con esquema: binding relajado, coerción y validación.
 ///
-/// Devuelve `(True, arbol)` o `(False, errores)`. La capa de Python decide qué excepción
-/// lanzar; el motor no conoce las clases de excepción de Python.
+/// Devuelve `(errores, avisos, arbol)`. La capa de Python decide qué excepción lanzar;
+/// el motor no conoce las clases de excepción de Python.
 fn load_typed(
     py: Python<'_>,
     ir: &str,
@@ -155,7 +156,8 @@ fn load_typed(
     env_prefix: &str,
     env: Option<HashMap<String, String>>,
     profiles: Vec<String>,
-) -> PyResult<(bool, Py<PyAny>)> {
+    on_unknown: &str,
+) -> PyResult<(Vec<Py<PyAny>>, Vec<Py<PyAny>>, Py<PyAny>)> {
     let schema = Schema::from_json(ir).map_err(to_py_err)?;
     let spec = Spec {
         files,
@@ -175,19 +177,56 @@ fn load_typed(
 
     let snapshot = builder.build().map_err(to_py_err)?;
 
-    match coerce(&snapshot, &schema) {
-        Ok(tree) => Ok((true, json_to_py(py, &tree)?)),
-        Err(errors) => {
-            let list = PyList::empty(py);
-            for error in &errors {
-                let dict = PyDict::new(py);
-                dict.set_item("path", &error.path)?;
-                dict.set_item("message", &error.message)?;
-                list.append(dict)?;
+    let coerceado = coerce(&snapshot, &schema);
+    let desconocidas = unknown_keys(&snapshot, &schema);
+
+    let mut errors: Vec<(String, String)> = Vec::new();
+    let mut warnings: Vec<(String, String)> = Vec::new();
+
+    let payload = match coerceado {
+        Ok(tree) => {
+            for item in desconocidas {
+                let message = match &item.suggestion {
+                    Some(suggestion) => {
+                        format!("clave desconocida, ¿quisiste decir {suggestion:?}?")
+                    }
+                    None => String::from("clave desconocida"),
+                };
+                match on_unknown {
+                    "ignore" => {}
+                    "error" => errors.push((item.path, message)),
+                    _ => warnings.push((item.path, message)),
+                }
             }
-            Ok((false, list.into_any().unbind()))
+            if errors.is_empty() {
+                json_to_py(py, &tree)?
+            } else {
+                py.None()
+            }
         }
-    }
+        Err(list) => {
+            errors.extend(list.into_iter().map(|error| (error.path, error.message)));
+            py.None()
+        }
+    };
+
+    Ok((
+        pairs_to_py(py, &errors)?,
+        pairs_to_py(py, &warnings)?,
+        payload,
+    ))
+}
+
+fn pairs_to_py(py: Python<'_>, pairs: &[(String, String)]) -> PyResult<Vec<Py<PyAny>>> {
+    pairs
+        .iter()
+        .map(|(path, message)| {
+            let dict = PyDict::new(py);
+            dict.set_item("path", path)?;
+            dict.set_item("message", message)?;
+            Ok(dict.into_any().unbind())
+        })
+        .collect()
 }
 
 fn build_snapshot(spec: &Spec) -> PyResult<Snapshot> {

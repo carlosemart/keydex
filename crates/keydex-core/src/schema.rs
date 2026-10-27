@@ -80,6 +80,167 @@ impl std::fmt::Display for ValidationError {
     }
 }
 
+/// Clave presente en la configuración que el esquema no usa.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownKey {
+    /// Ruta tal y como aparece en el snapshot.
+    pub path: String,
+    /// Ruta del esquema más parecida, si hay una razonablemente cerca.
+    pub suggestion: Option<String>,
+}
+
+/// Devuelve las claves del snapshot que ninguna ruta del esquema reconoce.
+///
+/// Es la red de seguridad contra el fallo más silencioso de una migración: un override
+/// que se escribe mal y no llega a aplicarse nunca.
+#[must_use]
+pub fn unknown_keys(snapshot: &Snapshot, schema: &Schema) -> Vec<UnknownKey> {
+    let mut known = Vec::new();
+    collect_leaf_paths(&schema.root, "", &mut known);
+
+    snapshot
+        .keys()
+        .filter(|key| !is_known(&schema.root, key))
+        .map(|key| UnknownKey {
+            path: key.to_string(),
+            suggestion: best_suggestion(key, &known),
+        })
+        .collect()
+}
+
+fn collect_leaf_paths(node: &Field, path: &str, out: &mut Vec<String>) {
+    match node.kind.as_str() {
+        "struct" => {
+            for (name, child) in &node.fields {
+                let child_path = if path.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{path}.{name}")
+                };
+                collect_leaf_paths(child, &child_path, out);
+            }
+        }
+        "list" => {
+            if let Some(items) = node.items.as_deref() {
+                collect_leaf_paths(items, path, out);
+            }
+        }
+        "optional" => {
+            if let Some(inner) = node.inner.as_deref() {
+                collect_leaf_paths(inner, path, out);
+            }
+        }
+        _ => {
+            if !path.is_empty() {
+                out.push(path.to_string());
+            }
+        }
+    }
+}
+
+fn is_known(root: &Field, path: &str) -> bool {
+    let mut current = root;
+    for segment in segments(path) {
+        let node = unwrap_optional(current);
+        if segment.starts_with('[') {
+            if node.kind != "list" {
+                return false;
+            }
+            match node.items.as_deref() {
+                Some(items) => current = items,
+                None => return false,
+            }
+        } else {
+            if node.kind != "struct" {
+                return false;
+            }
+            match node.fields.get(segment) {
+                Some(field) => current = field,
+                None => return false,
+            }
+        }
+    }
+    true
+}
+
+/// Descompone `servers[0].host` en `["servers", "[0]", "host"]`.
+fn segments(path: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    for part in path.split('.') {
+        let Some(open) = part.find('[') else {
+            out.push(part);
+            continue;
+        };
+        if open > 0 {
+            out.push(&part[..open]);
+        }
+        let mut rest = &part[open..];
+        while let Some(close) = rest.find(']') {
+            out.push(&rest[..=close]);
+            rest = &rest[close + 1..];
+            if rest.is_empty() {
+                break;
+            }
+        }
+    }
+    out
+}
+
+fn unwrap_optional(mut node: &Field) -> &Field {
+    while node.kind == "optional" {
+        match node.inner.as_deref() {
+            Some(inner) => node = inner,
+            None => break,
+        }
+    }
+    node
+}
+
+fn best_suggestion(unknown: &str, known: &[String]) -> Option<String> {
+    let unknown_last = last_segment(unknown);
+    let mut best: Option<(usize, &String)> = None;
+
+    for candidate in known {
+        let full = levenshtein(unknown, candidate);
+        // Comparar también el último segmento permite sugerir `name` cuando el usuario
+        // anidó mal (`app.name`).
+        let last = levenshtein(unknown_last, last_segment(candidate)).saturating_add(1);
+        let distance = full.min(last);
+        if best.is_none_or(|(current, _)| distance < current) {
+            best = Some((distance, candidate));
+        }
+    }
+
+    match best {
+        Some((distance, candidate)) if distance <= 2 => Some(candidate.clone()),
+        _ => None,
+    }
+}
+
+fn last_segment(path: &str) -> &str {
+    path.rsplit('.').next().unwrap_or(path)
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut previous: Vec<usize> = (0..=b.len()).collect();
+    let mut current = vec![0usize; b.len() + 1];
+
+    for (i, ca) in a.iter().enumerate() {
+        current[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            let deletion = previous[j + 1] + 1;
+            let insertion = current[j] + 1;
+            let substitution = previous[j] + cost;
+            current[j + 1] = deletion.min(insertion).min(substitution);
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+
+    previous[b.len()]
+}
 /// Resultado de la coerción: el árbol tipado o la lista de errores.
 pub type Coerced = core::result::Result<Json, Vec<ValidationError>>;
 

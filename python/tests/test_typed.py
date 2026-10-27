@@ -144,3 +144,32 @@ def test_interpolacion_llega_al_modelo(tmp_path: Path) -> None:
         env={},
     )
     assert cfg.url == "h:5432"
+
+
+def test_avisa_de_las_claves_desconocidas(tmp_path: Path) -> None:
+    path = write(tmp_path, "db:\n  host: h\n  prot: 1\n")
+    with pytest.warns(keydex.UnknownKeyWarning, match="db.prot"):
+        keydex.load(App, files=[path], env_prefix="APP_", env={})
+
+
+def test_sugiere_la_clave_parecida(tmp_path: Path) -> None:
+    path = write(tmp_path, "db:\n  host: h\n  prot: 1\n")
+    with pytest.warns(keydex.UnknownKeyWarning, match="db.port"):
+        keydex.load(App, files=[path], env_prefix="APP_", env={})
+
+
+def test_on_unknown_error_convierte_el_aviso_en_error(tmp_path: Path) -> None:
+    path = write(tmp_path, "db:\n  host: h\n  prot: 1\n")
+    with pytest.raises(keydex.ValidationError) as info:
+        keydex.load(App, files=[path], env_prefix="APP_", env={}, on_unknown="error")
+
+    assert any(error["path"] == "db.prot" for error in info.value.errors)
+
+
+def test_on_unknown_ignore_no_avisa(tmp_path: Path) -> None:
+    import warnings
+
+    path = write(tmp_path, "db:\n  host: h\n  prot: 1\n")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        keydex.load(App, files=[path], env_prefix="APP_", env={}, on_unknown="ignore")

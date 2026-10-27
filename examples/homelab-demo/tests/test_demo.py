@@ -86,3 +86,12 @@ def test_cli_devuelve_error_de_validacion(
     monkeypatch.setenv("APP_DB__PORT", "no-es-un-numero")
     assert main(["--profiles", "dev"]) == 1
     assert "db.port" in capsys.readouterr().err
+
+
+def test_avisa_si_el_nivel_esta_mal_anidado(tmp_path: Path) -> None:
+    # Reproduce el error real: `app.name` en vez de `name` en la raíz.
+    config = tmp_path / "app.yaml"
+    config.write_text("name: homelab\napp:\n  name: homelab\n", encoding="utf-8")
+
+    with pytest.warns(keydex.UnknownKeyWarning, match="name"):
+        keydex.load(App, files=[str(config)], env_prefix="APP_", env={})

@@ -54,6 +54,15 @@ except keydex.ValidationError as error:
     # [{"path": "db.port", "message": "se esperaba un entero, llegó \"muchos\""}]
 ```
 
+Las claves que ningún campo del modelo usa avisan, con sugerencia:
+
+```
+UnknownKeyWarning: db.prot: clave desconocida, ¿quisiste decir "db.port"?
+```
+
+Se controla con `on_unknown="warn" | "error" | "ignore"`. Es la red de seguridad contra
+el fallo más silencioso: un override mal escrito que nunca llega a aplicarse.
+
 El `explain` devuelve una estructura, no un texto:
 
 ```python

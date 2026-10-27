@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings as _warnings
 from typing import TypeVar
 
 from keydex import _schema
@@ -23,6 +24,7 @@ __all__ = [
     "KeydexError",
     "Secret",
     "Settings",
+    "UnknownKeyWarning",
     "ValidationError",
     "load",
     "load_settings",
@@ -31,6 +33,14 @@ __all__ = [
 __version__ = "0.0.1"
 
 T = TypeVar("T")
+
+
+class UnknownKeyWarning(UserWarning):
+    """Una clave de la configuración no la usa ninguna ruta del esquema.
+
+    Casi siempre es un error de escritura o un nivel mal anidado: el valor se ignora en
+    silencio y el override no aplica nunca.
+    """
 
 
 class ValidationError(KeydexError):
@@ -52,19 +62,31 @@ def load(
     env_prefix: str = "",
     env: dict[str, str] | None = None,
     profiles: tuple[str, ...] | list[str] = (),
+    on_unknown: str = "warn",
 ) -> T:
-    """Carga la configuración y devuelve una instancia tipada del modelo."""
+    """Carga la configuración y devuelve una instancia tipada del modelo.
+
+    `on_unknown` decide qué hacer con las claves que el esquema no usa: `"warn"`
+    (por defecto, `UnknownKeyWarning`), `"error"` (`ValidationError`) o `"ignore"`.
+    """
     ir = json.dumps(_schema.build_ir(model), separators=(",", ":"))
-    ok, payload = _load_typed(
+    errors, unknown, tree = _load_typed(
         ir,
         list(files),
         env_prefix,
         _environment(env, env_prefix),
         list(profiles),
+        on_unknown,
     )
-    if not ok:
-        raise ValidationError(payload)
-    return _schema.build(model, payload)  # type: ignore[return-value]
+    if errors:
+        raise ValidationError(errors)
+    for item in unknown:
+        _warnings.warn(
+            f"{item['path']}: {item['message']}",
+            UnknownKeyWarning,
+            stacklevel=2,
+        )
+    return _schema.build(model, tree)  # type: ignore[return-value]
 
 
 def load_settings(

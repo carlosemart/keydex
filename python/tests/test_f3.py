@@ -25,6 +25,7 @@ class Db:
     user: str
     password: Secret[str]
     host: str = "localhost"
+    port: int = 5432
 
 
 @dataclass(frozen=True)

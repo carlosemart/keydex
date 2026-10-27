@@ -198,3 +198,83 @@ fn rechaza_un_ir_de_otra_version() {
         keydex_core::Error::UnsupportedFormat { .. }
     ));
 }
+
+#[test]
+fn detecta_claves_desconocidas_con_sugerencia() {
+    let schema = Schema::from_json(IR).unwrap();
+    let mut builder = Builder::new().with_env(env(&[]));
+    builder
+        .schema_env_source(&schema, "APP_", Tier::Environment)
+        .unwrap();
+    builder
+        .document(
+            "x.yaml",
+            "db:\n  host: h\n  prot: 1\n",
+            Format::Yaml,
+            Tier::BaseFile,
+        )
+        .unwrap();
+    let snapshot = builder.build().unwrap();
+
+    let unknown = keydex_core::unknown_keys(&snapshot, &schema);
+    assert_eq!(unknown.len(), 1, "{unknown:?}");
+    assert_eq!(unknown[0].path, "db.prot");
+    assert_eq!(unknown[0].suggestion.as_deref(), Some("db.port"));
+}
+
+#[test]
+fn sugiere_la_ruta_cuando_el_nivel_esta_mal_anidado() {
+    let ir = r#"{
+      "ir": "keydex.schema/v1",
+      "root": {"type":"struct","required":true,"fields":{
+        "name": {"type":"str","required":true},
+        "db": {"type":"struct","required":false,"fields":{
+          "host": {"type":"str","required":false}
+        }}
+      }}
+    }"#;
+    let schema = Schema::from_json(ir).unwrap();
+    let mut builder = Builder::new().with_env(env(&[]));
+    builder
+        .schema_env_source(&schema, "APP_", Tier::Environment)
+        .unwrap();
+    builder
+        .document("x.yaml", "app:\n  name: h\n", Format::Yaml, Tier::BaseFile)
+        .unwrap();
+    let snapshot = builder.build().unwrap();
+
+    let unknown = keydex_core::unknown_keys(&snapshot, &schema);
+    assert_eq!(unknown.len(), 1, "{unknown:?}");
+    assert_eq!(unknown[0].path, "app.name");
+    assert_eq!(unknown[0].suggestion.as_deref(), Some("name"));
+}
+
+#[test]
+fn las_claves_anidadas_dentro_de_listas_son_conocidas() {
+    let ir = r#"{
+      "ir": "keydex.schema/v1",
+      "root": {"type":"struct","required":true,"fields":{
+        "servers": {"type":"list","required":false,"items":{
+          "type":"struct","required":false,"fields":{
+            "host": {"type":"str","required":false}
+          }
+        }}
+      }}
+    }"#;
+    let schema = Schema::from_json(ir).unwrap();
+    let mut builder = Builder::new().with_env(env(&[]));
+    builder
+        .schema_env_source(&schema, "APP_", Tier::Environment)
+        .unwrap();
+    builder
+        .document(
+            "x.yaml",
+            "servers:\n  - host: a\n  - host: b\n",
+            Format::Yaml,
+            Tier::BaseFile,
+        )
+        .unwrap();
+    let snapshot = builder.build().unwrap();
+
+    assert!(keydex_core::unknown_keys(&snapshot, &schema).is_empty());
+}

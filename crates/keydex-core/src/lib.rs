@@ -35,7 +35,7 @@ pub use error::{Error, Result};
 pub use loader::Builder;
 pub use parse::{Format, LineIndex};
 #[cfg(feature = "schema")]
-pub use schema::{Field, IR_VERSION, Schema, ValidationError, coerce};
+pub use schema::{Field, IR_VERSION, Schema, UnknownKey, ValidationError, coerce, unknown_keys};
 pub use snapshot::{Explanation, Snapshot};
 pub use source::{RawEntry, RawSource, SourceId, Tier};
 pub use value::{Provenance, Span, Value};
