@@ -16,18 +16,8 @@ nav:
   - Python guide: python.md
   - Rust guide: rust.md
   - Architecture: architecture.md
-  - API reference: api.md
-  - Reference:
-      - Key syntax: reference/keys.md
-      - Interpolation: reference/interpolation.md
-  - Troubleshooting: troubleshooting.md
-  - Coming from another library: migration.md
-  - Status: status.md
-  - Specification: spec.md
-  - Benchmarks: benchmarks.md
-  - Contributing: contributing.md
-  - Release: release.md
   - Decisions:
+      - Overview: adr/index.md
       - 0001 Name: adr/0001-name-keydex.md
       - 0002 No expressions: adr/0002-no-expressions.md
       - 0003 Wheels: adr/0003-wheels-abi3-and-314t.md
@@ -37,7 +27,19 @@ nav:
       - 0007 IR over serde: adr/0007-schema-ir-over-serde.md
       - 0008 Lock-free reads: adr/0008-arc-swap-lock-free-reads.md
   - Spikes:
+      - Overview: spikes/index.md
       - Parser spans: spikes/0001-parsers-spans.md
+  - Reference:
+      - Key syntax: reference/keys.md
+      - Interpolation: reference/interpolation.md
+  - API reference: api.md
+  - Troubleshooting: troubleshooting.md
+  - Coming from another library: migration.md
+  - Status: status.md
+  - Specification: spec.md
+  - Benchmarks: benchmarks.md
+  - Contributing: contributing.md
+  - Release: release.md
 
 plugins:
   - search
