@@ -237,11 +237,7 @@ fn matching_brace(input: &str, open: usize) -> std::result::Result<usize, ()> {
     Err(())
 }
 
-fn parse_inner(
-    inner: &str,
-    start: usize,
-    end: usize,
-) -> std::result::Result<Placeholder<'_>, ()> {
+fn parse_inner(inner: &str, start: usize, end: usize) -> std::result::Result<Placeholder<'_>, ()> {
     let (target, default) = split_default(inner);
     if target.is_empty() {
         return Err(());
