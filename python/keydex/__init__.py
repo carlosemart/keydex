@@ -70,7 +70,8 @@ class Environment:
     Args:
         files: Configuration files, in application order.
         env_prefix: Prefix stripped from environment variables.
-        env: Environment to use. Defaults to `os.environ`.
+        env: Environment to use. Defaults to `os.environ` only when `env_prefix` is not
+            empty; with no prefix, pass the variables explicitly.
         profiles: Active profiles, applied as ``<name>-<profile>.<ext>``.
         on_unknown: `"warn"`, `"error"` or `"ignore"` for keys the schema does not use.
         sensitive: Extra keys hidden from `explain`, `items` and `dump`.
@@ -181,7 +182,8 @@ def load(
         model: Dataclass describing the configuration.
         files: Configuration files, in application order.
         env_prefix: Prefix stripped from environment variables, for example `"APP_"`.
-        env: Environment to use. Defaults to `os.environ`.
+        env: Environment to use. Defaults to `os.environ` only when `env_prefix` is not
+            empty; with no prefix, pass the variables explicitly.
         profiles: Active profiles.
         on_unknown: `"warn"`, `"error"` or `"ignore"`.
         sensitive: Extra keys hidden from `explain`, `items` and `dump`.
@@ -222,7 +224,8 @@ def load_settings(
     Args:
         files: Configuration files, in application order.
         env_prefix: Prefix stripped from environment variables.
-        env: Environment to use. Defaults to `os.environ`.
+        env: Environment to use. Defaults to `os.environ` only when `env_prefix` is not
+            empty; with no prefix, pass the variables explicitly.
         profiles: Active profiles.
         sensitive: Keys hidden from `explain`, `items` and `dump`.
         secret_files: Resolve `*_FILE` variables by reading the referenced files.
@@ -265,7 +268,9 @@ def _environment(
         The engine marks whatever key those variables bind to, using the same binder that
         resolves them, so relaxed binding cannot desynchronise the mark.
     """
-    source = dict(os.environ) if env is None else dict(env)
+    # With no prefix and no injected environment, reading the process environment would
+    # let USER, HOME or PATH silently override configuration. Require one of the two.
+    source = (dict(os.environ) if prefix else {}) if env is None else dict(env)
 
     if not secret_files:
         return source, []

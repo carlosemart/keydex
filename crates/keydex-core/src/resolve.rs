@@ -8,6 +8,15 @@ use std::sync::Arc;
 
 use crate::value::Value;
 
+/// Why a resolver did not produce a value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolveError {
+    /// The resolver does not know this value; a default in the placeholder may apply.
+    NotFound,
+    /// The call itself is wrong; the reason must reach the user.
+    Invalid(String),
+}
+
 /// A `${name:args}` resolver.
 pub trait Resolver: Send + Sync {
     /// Name used in the placeholder.
@@ -22,7 +31,7 @@ pub trait Resolver: Send + Sync {
         &self,
         args: &[&str],
         env: &BTreeMap<String, String>,
-    ) -> std::result::Result<Value, String>;
+    ) -> std::result::Result<Value, ResolveError>;
 }
 
 /// Registry of resolvers available to interpolation.
@@ -79,13 +88,15 @@ impl Resolver for EnvResolver {
         &self,
         args: &[&str],
         env: &BTreeMap<String, String>,
-    ) -> std::result::Result<Value, String> {
+    ) -> std::result::Result<Value, ResolveError> {
         match args {
             [name] => env
                 .get(*name)
                 .map(|value| Value::str(value.as_str()))
-                .ok_or_else(|| format!("environment variable {name} is not set")),
-            _ => Err(String::from("env expects exactly one argument")),
+                .ok_or(ResolveError::NotFound),
+            _ => Err(ResolveError::Invalid(String::from(
+                "env expects exactly one argument",
+            ))),
         }
     }
 }

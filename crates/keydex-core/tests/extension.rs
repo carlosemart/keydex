@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use keydex_core::{Builder, Format, Node, Resolver, Source, SourceId, Tier, Value};
+use keydex_core::{Builder, Format, Node, ResolveError, Resolver, Source, SourceId, Tier, Value};
 
 /// A source that pretends to read command line arguments.
 struct CliSource;
@@ -39,9 +39,11 @@ impl Resolver for Upper {
         &self,
         args: &[&str],
         _env: &BTreeMap<String, String>,
-    ) -> std::result::Result<Value, String> {
+    ) -> std::result::Result<Value, ResolveError> {
         if args.len() != 1 {
-            return Err(String::from("upper expects one argument"));
+            return Err(ResolveError::Invalid(String::from(
+                "upper expects one argument",
+            )));
         }
         Ok(Value::str(args[0].to_uppercase()))
     }
@@ -116,4 +118,48 @@ fn an_unknown_resolver_is_an_error() {
         error,
         keydex_core::Error::UnknownResolver { ref name, .. } if name == "nope"
     ));
+}
+
+#[test]
+fn a_resolver_that_does_not_know_the_value_falls_back_to_the_default() {
+    let mut builder = Builder::new();
+    builder
+        .document(
+            "x.yaml",
+            "a: \"${env:KEYDEX_UNSET_TEST_VAR:-fallback}\"\n",
+            Format::Yaml,
+            Tier::BaseFile,
+        )
+        .unwrap();
+
+    let snapshot = builder.build().unwrap();
+    assert_eq!(snapshot.get("a"), Some(&Value::str("fallback")));
+}
+
+#[test]
+fn a_resolver_rejecting_the_call_reports_why() {
+    let mut builder = Builder::new();
+    builder.resolver(Arc::new(Upper));
+    builder
+        .document(
+            "x.yaml",
+            "a: \"${upper:one,two}\"\n",
+            Format::Yaml,
+            Tier::BaseFile,
+        )
+        .unwrap();
+
+    let error = builder.build().unwrap_err();
+    match error {
+        keydex_core::Error::Resolver {
+            ref path,
+            ref name,
+            ref message,
+        } => {
+            assert_eq!(path, "a");
+            assert_eq!(name, "upper");
+            assert!(message.contains("one argument"), "{message}");
+        }
+        other => panic!("expected a resolver error, got {other:?}"),
+    }
 }

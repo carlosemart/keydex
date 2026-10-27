@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{Error, Result};
-use crate::resolve::Resolvers;
+use crate::resolve::{ResolveError, Resolvers};
 use crate::source::render_path;
 use crate::value::{Node, Value};
 use crate::walk;
@@ -143,9 +143,14 @@ impl Resolver<'_> {
                 };
                 match resolver.resolve(args.as_slice(), self.env) {
                     Ok(value) => Ok(value),
-                    Err(_) => {
+                    Err(ResolveError::NotFound) => {
                         self.fallback(placeholder, path, &format!("{name}:{}", args.join(",")))
                     }
+                    Err(ResolveError::Invalid(message)) => Err(Error::Resolver {
+                        path: path.to_string(),
+                        name: name.to_string(),
+                        message,
+                    }),
                 }
             }
             Target::Key(key) => {

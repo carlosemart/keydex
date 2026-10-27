@@ -6,7 +6,8 @@ with the output of `python -m keydex dump` (redacted).
 ## My environment variable does not apply
 
 1. **Prefix.** With `env_prefix="APP_"`, only variables starting with `APP_` are read. A
-   bare `DB_HOST` is ignored.
+   bare `DB_HOST` is ignored. With no prefix and no `env=`, the process environment is not
+   read at all: pass `env=os.environ` explicitly if that is what you want.
 2. **Mode.** With a model, `APP_DB_HOST` binds to `db.host` (the schema disambiguates).
    Without a model, the separator must be `__`: `APP_DB__HOST`.
 3. **Case.** Variables are matched case-insensitively, but `_` is literal in dictionary

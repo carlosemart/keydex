@@ -169,6 +169,15 @@ fn node(
 }
 
 fn error(path: &Path, node: Option<&Node>, message: String) -> ValidationError {
+    // A failing secret must not end up in a log or a traceback.
+    let message = match node {
+        Some(node) if node.sensitive => match message.split_once(" got ") {
+            Some((head, _)) => format!("{head} got <redacted>"),
+            None => message,
+        },
+        _ => message,
+    };
+
     ValidationError {
         path: path.to_string(),
         message,

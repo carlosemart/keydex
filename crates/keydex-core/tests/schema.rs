@@ -496,3 +496,27 @@ fn an_integer_is_not_a_boolean() {
     let errors = load_ir(ir, "tls: 1\n").unwrap_err();
     assert_eq!(errors[0].path, "tls");
 }
+
+#[test]
+fn a_sensitive_value_that_fails_coercion_is_redacted() {
+    let schema = Schema::from_json(IR).unwrap();
+    let mut builder = Builder::new().with_env(env(&[]));
+    builder
+        .schema_env_source(&schema, "APP_", Tier::Environment)
+        .unwrap();
+    builder
+        .document(
+            "app.yaml",
+            "db:\n  host: h\n  port: super-secret-token\n",
+            Format::Yaml,
+            Tier::BaseFile,
+        )
+        .unwrap();
+    builder.mark_sensitive("db.port");
+    let snapshot = builder.build().unwrap();
+
+    let errors = coerce(&snapshot, &schema).unwrap_err();
+    let message = &errors[0].message;
+    assert!(message.contains("<redacted>"), "{message}");
+    assert!(!message.contains("super-secret-token"), "{message}");
+}

@@ -26,14 +26,29 @@ The tag triggers `.github/workflows/release.yml`:
 
 | Job | Output |
 |---|---|
+| `verify` | fails unless the tag is exactly `v` + the workspace version |
 | `sdist` | source tarball |
 | `wheels` | `cp311-abi3` for x86_64 and aarch64, manylinux 2.28 |
-| `publish-pypi` | uploads the sdist and the wheels to PyPI |
-| `publish-crates` | publishes `keydex-core` |
+| `wheels-freethreaded` | `cp314t` wheel, built and tested, kept as an artifact only |
+| `publish-pypi` | uploads the sdist and the two `abi3` wheels to PyPI |
+| `publish-crates` | publishes `keydex-core`, only after PyPI succeeded |
+
+`publish-pypi` downloads the artifacts by name, never with a glob, and a step fails the job
+if any `cp314t` wheel reaches the upload directory: a published filename cannot be taken
+back. `publish-crates` waits for `publish-pypi` so a failed Python release does not leave a
+Rust release behind.
 
 The free-threaded wheel (`cp314t`) is built and tested in CI (the GIL is asserted off) but
 **not published yet**: publishing is out of scope for now, not blocked by the read path —
-that became lock-free with the `ArcSwap` change.
+that became lock-free with the `ArcSwap` change. When it is published, that is a deliberate
+edit to the workflow, not an accident of a wildcard.
+
+## After the tag
+
+The workflow stops at publication. Nothing rewrites the documentation automatically, so a
+release also needs a follow-up commit on `main` that flips the "not published yet" claims —
+`README.md`, `docs/install.md`, `docs/status.md` and the `CHANGELOG.md` entry — to point at
+the real versions.
 
 ## Why two builds
 

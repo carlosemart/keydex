@@ -50,7 +50,12 @@ def _node(tp: object, *, required: bool, has_default: bool = False) -> dict:
             "inner": _node(inner, required=False),
         }
 
-    if origin in (list, tuple):
+    if origin is tuple:
+        raise TypeError(
+            "tuple is not supported: use list[T]; a tuple would come back as a list"
+        )
+
+    if origin is list:
         args = typing.get_args(tp)
         item = args[0] if args else str
         return {"type": "list", "required": required, "items": _node(item, required=False)}
@@ -128,7 +133,7 @@ def _sensitive_node(tp: object, path: str) -> list[str]:
     if origin is Secret:
         return [path]
 
-    if origin in (list, tuple):
+    if origin is list:
         args = typing.get_args(tp)
         item = args[0] if args else str
         return [path] if item is Secret or typing.get_origin(item) is Secret else []
@@ -162,7 +167,7 @@ def _convert(tp: object, value: object) -> object:
             return value
         return _convert(inner[0], value)
 
-    if origin in (list, tuple):
+    if origin is list:
         args = typing.get_args(tp)
         item = args[0] if args else str
         return [_convert(item, element) for element in typing.cast("list[object]", value)]

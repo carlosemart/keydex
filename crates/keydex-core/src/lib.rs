@@ -86,7 +86,7 @@ mod walk;
 pub use error::{Error, Result};
 pub use loader::Builder;
 pub use parse::{Format, LineIndex};
-pub use resolve::{EnvResolver, Resolver, Resolvers};
+pub use resolve::{EnvResolver, ResolveError, Resolver, Resolvers};
 #[cfg(feature = "schema")]
 #[cfg_attr(docsrs, doc(cfg(feature = "schema")))]
 pub use schema::{

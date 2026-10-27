@@ -12,6 +12,20 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag must match the workspace version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "keydex-core") | .version')
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match workspace version v${version}" >&2
+            exit 1
+          fi
+          echo "releasing ${GITHUB_REF_NAME}"
+
   sdist:
     runs-on: ubuntu-latest
     steps:
@@ -69,19 +83,39 @@ jobs:
           path: dist-ft/*.whl
 
   publish-pypi:
-    needs: [sdist, wheels]
+    needs: [verify, sdist, wheels]
     runs-on: ubuntu-latest
     environment: pypi
     steps:
+      # Explicit artifacts, not a glob: the free-threaded wheel is built and tested but
+      # never uploaded, because its tag (`cp314t`) would become a permanent PyPI filename.
       - uses: actions/download-artifact@v4
         with:
+          name: sdist
           path: dist
-          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-x86_64
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-aarch64
+          path: dist
+      - name: No free-threaded wheel may slip through
+        run: |
+          if ls dist/*cp314t* >/dev/null 2>&1; then
+            echo "a cp314t wheel reached the upload directory" >&2
+            exit 1
+          fi
+          ls -l dist
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
 
+  # After PyPI on purpose: if the Python release fails, crates.io is not touched, so the
+  # two never drift apart.
   publish-crates:
+    needs: [publish-pypi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

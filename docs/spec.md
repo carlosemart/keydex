@@ -151,6 +151,8 @@ exposes them. That drives the dependency choice (§17.3).
 ### 5.3 Environment
 
 - Configurable prefix (`env_prefix="APP_"`), stripped and lowercased. **Implemented.**
+- With no prefix and no injected environment, the process environment is **not** read.
+  Otherwise `USER`, `HOME` or `PATH` would silently override configuration keys. **Implemented.**
 - Syntax: see §6.
 - `*_FILE`: if `APP_DB_PASSWORD_FILE` exists **and `secret_files=True`**, the value is
   read from the file, must live under `secret_root`, and the derived key is marked
@@ -218,6 +220,7 @@ nested dataclasses, `Enum`, `Path`, `Decimal`, `UUID`, `Secret[T]`.
 
 | Type | Accepts (`relaxed` mode) | Notes |
 |---|---|---|
+| `str` | `str` | A list, map or number is **rejected**, never stringified (`"[a, b]"`, `"1.1"`) |
 | `bool` | `true/false`, `yes/no`, `on/off`, `"1"/"0"` as **text** | A YAML/TOML/JSON integer `1` is rejected |
 | `int` | `42`, `"42"` | |
 | `float` | `3.14`, `"3.14"`, integers | |
@@ -266,7 +269,11 @@ A string that is exactly one placeholder inherits the type of the referenced val
 `env` is implemented. **Planned:** `base64`, `int`, `float`, `bool`, `list`, `json`,
 `uuid`, and Python-registered resolvers.
 
-- Arguments separated by `,`, escapable with `\,`. *Planned.*
+- Arguments are separated by `,`. Escaping a literal comma (`\,`) is *planned*.
+- A resolver reports one of two outcomes. `NotFound` means it has no value, so a
+  placeholder default (`${env:PORT:-8080}`) applies. `Invalid(message)` means the call is
+  wrong (missing arguments, bad path) and fails the load with `Error::Resolver` carrying
+  the key, the resolver name and the reason. A resolver never swallows its own error.
 - `file:` would read arbitrary paths: disabled by default and never enabled implicitly.
 - A resolver must be **pure**. No network and no global state from the core.
 - There is no expression language: no arithmetic, conditionals or method access. If it is

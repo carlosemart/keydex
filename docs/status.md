@@ -26,6 +26,7 @@ covered by tests; `❌` means designed but not built.
 | Literal keys with dots (`a["a.b"]`) | ✅ |
 | Interpolation `${key}`, `${key:-default}`, nesting, escapes | ✅ |
 | `${env:VAR}` and custom resolvers | ✅ |
+| Resolver `NotFound` falls back to the default, `Invalid` fails the load | ✅ |
 | Relative references (`${.sibling}`) | ❌ |
 | Cycle detection with a trace | ✅ |
 
@@ -47,6 +48,7 @@ covered by tests; `❌` means designed but not built.
 | Feature | Status |
 |---|---|
 | Aggregated errors with path, file, line and column | ✅ |
+| Sensitive values redacted in validation messages | ✅ |
 | Required fields and lists | ✅ |
 | Enum / decimal / UUID validation in the engine | ✅ |
 | Unknown keys with edit-distance suggestions (`on_unknown`) | ✅ |

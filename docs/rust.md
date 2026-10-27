@@ -208,16 +208,22 @@ struct Upper;
 impl keydex_core::Resolver for Upper {
     fn name(&self) -> &'static str { "upper" }
     fn resolve(&self, args: &[&str], _env: &BTreeMap<String, String>)
-        -> Result<Value, String> {
-        Ok(Value::str(args[0].to_uppercase()))
+        -> Result<Value, ResolveError> {
+        match args {
+            [text] => Ok(Value::str(text.to_uppercase())),
+            _ => Err(ResolveError::Invalid(String::from("upper expects one argument"))),
+        }
     }
 }
 
 builder.resolver(std::sync::Arc::new(Upper));   // ${upper:hello} -> HELLO
 ```
 
-`env` is a built-in resolver, registered by default. An unregistered name is a
-`UnknownResolver` error, not a silent empty value.
+`ResolveError` separates the two outcomes: `NotFound` means the resolver has no value, so
+a default in the placeholder (`${env:PORT:-8080}`) applies; `Invalid(message)` means the
+call itself is wrong and fails the load with `Error::Resolver`, carrying the key, the
+resolver name and the reason. An unregistered name is a `UnknownResolver` error, not a
+silent empty value.
 
 Formats are still a closed enum (`yaml`, `toml`, `json`): adding one means editing the
 core. It is the next extension point, not a current one.

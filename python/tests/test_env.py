@@ -98,3 +98,27 @@ def test_a_typed_refresh_needs_a_new_load(tmp_path: Path) -> None:
 
     assert before.db.host == "base"  # the model is a copy
     assert after.db.host == "changed"
+
+
+def test_no_prefix_does_not_read_the_process_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Without a prefix, ingesting os.environ would let any variable named like a key
+    # (HOST, PORT, USER) override the file behind the user's back.
+    monkeypatch.setenv("HOST", "from-the-shell")
+    source = write(tmp_path, "app.yaml", "host: from-file\nport: 5432\n")
+
+    settings = keydex.load_settings(files=[source])
+
+    assert settings["host"] == "from-file"
+
+
+def test_a_prefix_still_reads_the_process_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("APP_HOST", "from-the-shell")
+    source = write(tmp_path, "app.yaml", "host: from-file\n")
+
+    settings = keydex.load_settings(files=[source], env_prefix="APP_")
+
+    assert settings["host"] == "from-the-shell"

@@ -42,6 +42,14 @@ First functional release. `0.0.1` was only a name reservation.
 
 - `settings[key]` and `dict(settings)` redact sensitive values, like `items()` and `dump`.
   `get()` remains the raw escape hatch.
+- `Resolver::resolve` returns `ResolveError`: `NotFound` lets a placeholder default apply,
+  `Invalid(message)` fails the load with `Error::Resolver`, naming the key, the resolver and
+  the reason. A resolver can no longer swallow its own error.
+- A `str` field rejects lists, maps and numbers instead of stringifying them.
+- A `tuple[T]` annotation is rejected with `TypeError`; it used to be accepted and come back
+  as a list.
+- With `env_prefix=""` and no `env`, the process environment is no longer read: `USER`,
+  `HOME` or `PATH` could silently override configuration keys.
 
 ### Fixed
 
@@ -59,7 +67,14 @@ First functional release. `0.0.1` was only a name reservation.
   variable no longer becomes a configuration key.
 - `Path` render/parse round-trips keys containing quotes and backslashes; YAML merge keys are
   resolved.
-- An `Optional[T]` with a dataclass default keeps that default when the key is absent.
+- An `Optional[T]` with a dataclass default keeps that default when the key is absent, and
+  so does a nested dataclass with a `default_factory`.
+- A container holding a secret is sensitive too: `settings["db"]`, `explain("db")` and
+  `get("db")` no longer return a nested password in the clear.
+- `*_FILE` sensitivity is derived by the same binder that resolved the variable, so relaxed
+  binding (`APP_DB_PASSWORD_FILE` → `db.password`) marks the key it actually binds.
+- A required `Secret[T]` that is absent is a `ValidationError`, not a Python `TypeError`.
+- Validation messages redact the value of a sensitive node instead of echoing it.
 
 ### Documentation
 
@@ -78,6 +93,9 @@ First functional release. `0.0.1` was only a name reservation.
 - Not published: PyPI holds the `0.0.1` reservation and crates.io the `keydex-core` one.
 - `imports:` / `includes:`, remote sources and `watch()` are not implemented.
 - `Format` is a closed enum; adding a format means editing the core.
+- `on_unknown` accepts `warn`, `error` and `ignore`; an unknown *value* of the option itself
+  is not validated.
+- `~` is not expanded in `Path` values resolved by Rust `refresh()`.
 - No validation ranges/regex, no `datetime`/`duration`/`size`, and no
   `pydantic`/`attrs`/`msgspec` models.
 

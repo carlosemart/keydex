@@ -420,3 +420,13 @@ def test_a_file_variable_marks_the_key_it_binds_to(tmp_path: Path) -> None:
     assert cfg.db.password == "s3cr3t"
     assert env.explain("db.password")["redacted"] is True
     assert env.explain("db")["redacted"] is True
+
+
+def test_a_tuple_annotation_is_rejected(tmp_path: Path) -> None:
+    # A tuple would come back as a list: silently wrong, so it is an annotation error.
+    @dataclass(frozen=True)
+    class Tags:
+        tags: tuple[str, ...]
+
+    with pytest.raises(TypeError, match="tuple"):
+        keydex.load(Tags, files=[write(tmp_path, "tags: [a]\n")], env_prefix="APP_", env={})

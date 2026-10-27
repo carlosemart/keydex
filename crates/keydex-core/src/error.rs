@@ -74,6 +74,17 @@ pub enum Error {
         cycle: String,
     },
 
+    /// A resolver rejected the call (bad arguments, not a missing value).
+    #[error("{name} failed in {path}: {message}")]
+    Resolver {
+        /// Key where the placeholder appears.
+        path: String,
+        /// Resolver name.
+        name: String,
+        /// Why it failed.
+        message: String,
+    },
+
     /// A placeholder names a resolver that is not registered.
     #[error("unknown resolver {name} in {path}")]
     UnknownResolver {

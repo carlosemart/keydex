@@ -38,6 +38,12 @@ A resolver is a pure function: no network, no filesystem, no global state. Regis
 from Rust with `Builder::resolver`; an unregistered name is a `UnknownResolver` error, not an
 empty value. Python resolver registration is not implemented.
 
+A resolver answers in one of two ways. `NotFound` means it has no value, so a default in the
+placeholder (`${env:PORT:-8080}`) applies, or the load fails with `MissingReference` if there
+is none. `Invalid(message)` means the call is wrong — argument count, bad input — and the
+load fails with `Resolver`, naming the key, the resolver and the reason. Silently treating a
+bad call as "no value" would turn a typo into a default.
+
 ## Where it applies
 
 Every string leaf in the merged tree, in every format, including inside sequences and maps.
