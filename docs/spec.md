@@ -343,15 +343,16 @@ stable across releases.
       },
       "note": { "type": "optional", "required": false, "inner": { "type": "str" } },
       "tags": { "type": "list", "required": false, "items": { "type": "str" } },
-      "mode": { "type": "str", "required": false, "converter": "enum" }
+      "mode": { "type": "str", "required": false }
     }
   }
 }
 ```
 
-Types in v1: `str`, `int`, `float`, `bool`, `any`, `struct`, `optional`, `list`. The
-`converter` field tells the Python layer which rich conversion to apply afterwards
-(`enum`, `path`, `decimal`, `uuid`, `secret`): the engine does not know those types.
+Types in v1: `str`, `int`, `float`, `bool`, `any`, `struct`, `optional`, `list`. The engine
+is language neutral: it knows nothing about host language types. Rich conversions
+(`Enum`, `Path`, `Decimal`, `UUID`, `Secret`) are applied by the calling layer after
+coercion, based on its own type information.
 
 Evolution rules:
 

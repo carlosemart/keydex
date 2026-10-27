@@ -42,6 +42,15 @@ pub enum Error {
         format: String,
     },
 
+    /// The IR version is not the one this build understands.
+    #[error("unsupported schema version: found {found}, expected {expected}")]
+    UnsupportedSchema {
+        /// Version found in the document.
+        found: String,
+        /// Version the engine understands.
+        expected: String,
+    },
+
     /// A `${...}` reference points to a key that does not exist.
     #[error("missing reference: {reference} (used in {path})")]
     MissingReference {

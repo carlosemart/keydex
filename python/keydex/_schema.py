@@ -47,7 +47,7 @@ def _node(tp: object, *, required: bool) -> dict:
         inner = args[0] if args else str
         if inner is not str:
             raise TypeError("Secret[T] only supports str for now")
-        return {"type": "str", "required": required, "converter": "secret"}
+        return {"type": "str", "required": required}
 
     if origin in (list, tuple):
         args = typing.get_args(tp)
@@ -66,10 +66,10 @@ def _node(tp: object, *, required: bool) -> dict:
         return {"type": "struct", "required": required, "fields": fields}
 
     if isinstance(tp, type) and issubclass(tp, Enum):
-        return {"type": "str", "required": required, "converter": "enum"}
+        return {"type": "str", "required": required}
 
     if tp in _CONVERTERS:
-        return {"type": "str", "required": required, "converter": _CONVERTERS[tp]}
+        return {"type": "str", "required": required}
 
     simple = {str: "str", int: "int", float: "float", bool: "bool"}
     if tp in simple:

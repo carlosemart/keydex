@@ -195,7 +195,7 @@ fn rejects_an_ir_from_another_version() {
         Schema::from_json(r#"{"ir":"keydex.schema/v2","root":{"type":"str"}}"#).unwrap_err();
     assert!(matches!(
         error,
-        keydex_core::Error::UnsupportedFormat { .. }
+        keydex_core::Error::UnsupportedSchema { .. }
     ));
 }
 
