@@ -44,9 +44,18 @@ docs/adr/           decisiones irreversibles
 
 ```
 ./scripts/check.sh     # fmt + clippy -D warnings
-cargo test --workspace
+cargo test --workspace --exclude keydex-py
 ./scripts/gate.sh      # invariantes de arquitectura (reglas 1 y 2)
 ```
+
+## Git
+
+- **Nunca `git push` a `main`.** Está protegida: rama + PR, siempre.
+- Una rama por cambio: `feat/…`, `fix/…`, `docs/…`, `chore/…`.
+- Antes de abrir el PR: `./scripts/check.sh`, `cargo test --workspace --exclude keydex-py`
+  y `python -m pytest python/tests examples/homelab-demo/tests`.
+- No reescribir historia compartida (`--force`) ni publicar (tag, PyPI, crates.io) sin
+  OK explícito del usuario.
 
 ## Terminado cuando
 
