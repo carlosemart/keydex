@@ -1,7 +1,7 @@
-"""Modelo de configuración del servicio de homelab.
+"""Configuration model of the homelab service.
 
-Todo lo que keydex necesita saber está aquí: los tipos y sus defaults. La procedencia
-(quién definió cada valor) la resuelve el motor.
+Everything keydex needs to know lives here: the types and their defaults. Provenance
+(who defined each value) is resolved by the engine.
 """
 
 from __future__ import annotations

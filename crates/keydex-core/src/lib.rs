@@ -1,14 +1,15 @@
 //! # keydex-core
 //!
-//! Motor de configuración de `keydex`: fuentes, precedencia, merge, interpolación y
-//! procedencia.
+//! keydex configuration engine: sources, precedence, merge, interpolation, coercion and
+//! provenance.
 //!
-//! Este crate es Rust puro y se publica en crates.io. Reglas duras (ver `AGENTS.md`):
+//! This crate is pure Rust and is published on crates.io. Hard rules (see `AGENTS.md`):
 //!
-//! - **No** depende de `pyo3`.
-//! - **No** lee entorno, reloj ni sistema de ficheros: todo entra inyectado.
-//! - Los errores son enums, nunca `String`.
-//! - Cero estado global mutable.
+//! - It does **not** depend on `pyo3`.
+//! - It does **not** read the environment, the clock or the filesystem: everything is
+//!   injected.
+//! - Errors are enums, never `String`.
+//! - No mutable global state.
 
 #![forbid(unsafe_code)]
 #![forbid(static_mut_refs)]
@@ -40,8 +41,8 @@ pub use snapshot::{Explanation, Snapshot};
 pub use source::{RawEntry, RawSource, SourceId, Tier};
 pub use value::{Provenance, Span, Value};
 
-/// Versión del contrato del esquema (`keydex.schema/v1`).
+/// Version of the schema contract (`keydex.schema/v1`).
 ///
-/// El IR se versiona de forma independiente a la versión del paquete: sobrevive a
-/// varias releases y solo cambia ante una ruptura del contrato.
+/// The IR is versioned independently from the package: it survives several releases and
+/// only changes when the contract breaks.
 pub const SCHEMA_IR_VERSION: &str = "keydex.schema/v1";

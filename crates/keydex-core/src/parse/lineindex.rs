@@ -1,17 +1,17 @@
-//! Índice de inicios de línea.
+//! Line start index.
 //!
-//! Convierte un offset de bytes en (línea, columna) en O(log n). Sin esto la conversión
-//! es O(n) por clave y el parseo completo se vuelve cuadrático: medido en el spike
-//! 0001, 10 veces más lento con 1000 claves.
+//! Converts a byte offset into (line, column) in O(log n). Without it the conversion is
+//! O(n) per key and the whole parse becomes quadratic: measured in spike 0001, 10 times
+//! slower with 1000 keys.
 
-/// Índice de inicios de línea de un documento.
+/// Line start index of a document.
 #[derive(Debug, Clone)]
 pub struct LineIndex {
     starts: Vec<usize>,
 }
 
 impl LineIndex {
-    /// Construye el índice para un documento.
+    /// Builds the index for a document.
     #[must_use]
     pub fn new(src: &str) -> Self {
         let mut starts = vec![0usize];
@@ -23,7 +23,7 @@ impl LineIndex {
         Self { starts }
     }
 
-    /// Convierte un offset de bytes en línea (1-based) y columna en caracteres.
+    /// Converts a byte offset into a line (1-based) and a column in characters.
     #[must_use]
     pub fn line_col(&self, src: &str, offset: usize) -> (u32, u32) {
         let offset = offset.min(src.len());

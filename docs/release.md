@@ -1,51 +1,51 @@
-# Publicación
+# Release
 
-## Antes de la primera release
+## Before the first release
 
-Dos cosas que solo puede hacer el titular de las cuentas:
+Two things only the account owner can do:
 
-1. **PyPI — Trusted Publishing.** En <https://pypi.org/manage/project/keydex/settings/publishing/>
-   añadir un publisher: owner `carlosemart`, repo `keydex`, workflow `release.yml`,
-   environment `pypi`. Con eso el workflow obtiene credenciales efímeras por OIDC y no
-   hay ningún token guardado.
-2. **crates.io — token de publicación.** Crear un token *scoped* a `keydex-core` y
-   guardarlo como secret `CARGO_REGISTRY_TOKEN` del repo. El workflow lo pasa por
-   entorno, nunca por `argv`.
+1. **PyPI — Trusted Publishing.** At
+   <https://pypi.org/manage/project/keydex/settings/publishing/> add a publisher: owner
+   `carlosemart`, repo `keydex`, workflow `release.yml`, environment `pypi`. The workflow
+   then gets ephemeral credentials through OIDC and no token is stored.
+2. **crates.io — publish token.** Create a token *scoped* to `keydex-core` and store it as
+   the `CARGO_REGISTRY_TOKEN` repository secret. The workflow passes it through the
+   environment, never through `argv`.
 
 ## Release
 
 ```bash
-# 1. Bump de versión en Cargo.toml (workspace) y entrada en CHANGELOG.md
-# 2. Commit y push a main
+# 1. Bump the version in Cargo.toml (workspace) and add a CHANGELOG.md entry
+# 2. Commit and push to main
 git tag -a v0.1.0 -m "0.1.0"
 git push origin v0.1.0
 ```
 
-El tag dispara `.github/workflows/release.yml`:
+The tag triggers `.github/workflows/release.yml`:
 
-| Job | Salida |
+| Job | Output |
 |---|---|
-| `sdist` | tarball de fuentes |
-| `wheels` | `cp311-abi3` para x86_64 y aarch64, manylinux 2.28 |
-| `wheels-freethreaded` | `cp314t` (sin `abi3`, con `gil_used = false`) |
-| `publish-pypi` | sube todo a PyPI |
-| `publish-crates` | publica `keydex-core` |
+| `sdist` | source tarball |
+| `wheels` | `cp311-abi3` for x86_64 and aarch64, manylinux 2.28 |
+| `wheels-freethreaded` | `cp314t` (without `abi3`, with `gil_used = false`) |
+| `publish-pypi` | uploads everything to PyPI |
+| `publish-crates` | publishes `keydex-core` |
 
-## Por qué dos builds
+## Why two builds
 
-`abi3` y free-threading son incompatibles hoy: un wheel `abi3` no carga en un intérprete
-`t`, y el `abi3t` (PEP 803) todavía no está disponible. Por eso el crate tiene la feature
-`abi3` y el build free-threaded se hace con `--no-default-features`.
+`abi3` and free-threading are incompatible today: an `abi3` wheel does not load in a `t`
+interpreter, and `abi3t` (PEP 803) is not available yet. That is why the crate has the
+`abi3` feature and the free-threaded build uses `--no-default-features`.
 
-## Verificación
+## Verification
 
 ```bash
-# wheel normal en un venv limpio
+# normal wheel in a clean venv
 uv venv /tmp/v --python 3.14
 uv pip install --python /tmp/v/bin/python dist/*.whl pytest
 /tmp/v/bin/python -m pytest python/tests examples/homelab-demo/tests -q
 
-# free-threading real
+# real free-threading
 uv python install 3.14t
 uv venv /tmp/vft --python 3.14t
 maturin build --release --no-default-features --interpreter /tmp/vft/bin/python --out dist-ft

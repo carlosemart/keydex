@@ -1,4 +1,4 @@
-//! YAML con spans, vía `saphyr` (que incluye `marked_yaml`).
+//! YAML with spans, through `saphyr` (which bundles `marked_yaml`).
 
 use saphyr::{LoadableYamlNode, MarkedYaml, Scalar, YamlData};
 

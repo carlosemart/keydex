@@ -1,278 +1,286 @@
-# keydex — Especificación
+# keydex — Specification
 
-> Librería de **acceso a configuración** para Python, con núcleo en Rust.
-> Tipada, explicable y rápida: pides una clave, recibes el valor correcto, del origen
-> correcto, con el tipo correcto, y puedes preguntar **por qué**.
+> A **configuration access** library for Python, with a Rust core.
+> Typed, explainable and fast: you ask for a key, you get the right value, from the right
+> origin, with the right type, and you can ask **why**.
 
-Estado: especificación cerrada · Fecha: 2026-10-27
+Status: closed specification · Date: 2026-10-27 · Release: 0.1.0
 
----
-
-## 0. Resumen
-
-`keydex` resuelve el problema de "¿de dónde sale este valor de configuración?" con una
-API tipada y un motor en Rust. Toma lo mejor de Spring `Environment` (property sources,
-perfiles, relaxed binding, precedencia explícita) y de OmegaConf (interpolación,
-composición, sentinel de valor ausente), pero sin el coste de un árbol de objetos Python
-por nodo y sin el `eval` de expresiones.
-
-**Diferenciador principal:** cada valor del snapshot conoce su procedencia completa
-(fuente, fichero, línea, cadena de placeholders, quién fue sombreado). Es lo que
-convierte la librería en herramienta de operación, no solo de carga.
+Sections marked **Planned** describe the agreed design but are not implemented yet. The
+code and this document must not disagree: if a behaviour changes, this file changes in the
+same pull request.
 
 ---
 
-## 1. Decisiones cerradas
+## 0. Summary
 
-| Decisión | Valor |
+`keydex` solves "where does this configuration value come from?" with a typed API and a Rust
+engine. It takes the best of Spring `Environment` (property sources, profiles, relaxed
+binding, explicit precedence) and of OmegaConf (interpolation, composition, a missing-value
+sentinel), without paying for a tree of Python objects per node and without `eval`.
+
+**Main differentiator:** every value in the snapshot knows its full provenance (source,
+file, line, placeholder chain, who was shadowed). That is what turns the library into an
+operations tool rather than just a loader.
+
+---
+
+## 1. Closed decisions
+
+| Decision | Value |
 |---|---|
-| Nombre | `keydex` (`keydex-core`, `keydex-py`, `import keydex`) |
-| API principal | `load(Modelo)` tipada + `env.get()` como escape hatch |
-| Python | 3.11+ · wheel `abi3-py311` · wheel `cp314t` para free-threading |
-| Alcance | Solo Python; `keydex-core` se publica en crates.io cuando el MVP sea usable |
-| Precedencia | Bandas ordenadas + orden de inserción por fuente |
-| Binding | Relaxed, resuelto contra el esquema (ver §6) |
-| Interpolación | Solo referencias + resolvers. **Sin expresiones, sin `eval`** |
-| Composición | `imports`/`includes` en core; grupos tipo Hydra = plugin futuro |
-| Recarga | `refresh()` en v1; `watch()` en v2 |
-| Reparto | Rust: parseo, merge, interpolación, coerción, validación, procedencia. Python: tipos, ergonomía, integraciones |
-| Rendimiento | Cero FFI por acceso; snapshot inmutable compartido |
-| No-objetivos | DI container, expresiones, FFI multi-lenguaje, wasm, hot reload por defecto |
+| Name | `keydex` (`keydex-core`, `keydex-py`, `import keydex`) |
+| Main API | typed `load(Model)` plus `env.get()` as an escape hatch |
+| Python | 3.11+ · `abi3-py311` wheel · `cp314t` wheel for free-threading |
+| Scope | Python only; `keydex-core` is published to crates.io |
+| Precedence | Ordered bands plus insertion order inside a band |
+| Binding | Relaxed, resolved against the schema (see §6) |
+| Interpolation | References and resolvers only. **No expressions, no `eval`** |
+| Composition | `imports`/`includes` planned; Hydra-style groups as a future plugin |
+| Reload | `refresh()` in v1; `watch()` in v2 |
+| Split | Rust: parsing, merge, interpolation, coercion, validation, provenance. Python: types, ergonomics, integrations |
+| Performance | Zero FFI per access; shared immutable snapshot |
+| Non-goals | DI container, expressions, multi-language FFI, wasm, hot reload by default |
 
 ---
 
-## 2. Principios invariantes
+## 2. Invariant principles
 
-Reglas que no se negocian; son baratas al principio y carísimas después.
+Rules that are not negotiable; they are cheap now and very expensive later.
 
-1. **`keydex-core` no conoce Python.** `cargo tree -p keydex-core` no puede contener
-   `pyo3`. Verificado en CI como gate bloqueante.
-2. **El core no lee el entorno, ni el reloj, ni el sistema de ficheros.** Todo entra
-   inyectado (`EnvSource`, `FileProvider`, `Clock`). Es lo que permite testearlo,
-   embeberlo y publicarlo como crate útil.
-3. **Errores estructurados, nunca `String`.** Enums con `thiserror`; cada capa los
-   formatea (excepción en Python, JSON en CLI).
-4. **Cero estado global mutable.** Sin `static` de configuración, sin caches sin lock.
-   Un solo esfuerzo cubre a la vez hilos y free-threading.
-5. **Un solo FFI por operación de alto nivel.** `build()` y `refresh()` cruzan la
-   frontera; los accesos, no.
+1. **`keydex-core` does not know Python.** `cargo tree -p keydex-core` must not contain
+   `pyo3`. Enforced in CI as a blocking gate.
+2. **The core does not read the environment, the clock or the filesystem.** Everything is
+   injected. That is what makes it testable, embeddable and publishable as a useful crate.
+3. **Structured errors, never `String`.** `thiserror` enums; each layer formats them (an
+   exception in Python, JSON in the CLI).
+4. **No mutable global state.** No configuration `static`, no cache without a lock. One
+   effort covers both threads and free-threading.
+5. **One FFI crossing per high-level operation.** `build()` and `refresh()` cross the
+   boundary; accesses do not.
 
 ---
 
-## 3. Modelo conceptual
+## 3. Conceptual model
 
 ```
-          ┌──────────────── PropertySource (banda + orden) ────────────────┐
-          │  YAML · TOML · JSON · INI · .env · env vars · CLI · secretos  │
+          ┌──────────────── PropertySource (band + order) ─────────────────┐
+          │  YAML · TOML · JSON · env vars · CLI · secrets                 │
           └───────────────────────────────┬───────────────────────────────┘
                                           │ bytes + spans
                                           ▼
-                                    Parseo (Rust)
+                                    Parse (Rust)
                                           ▼
-                                  Árbol de valores con spans
+                                  Value tree with spans
                                           ▼
-                     Merge determinista (§9)  +  activación de perfiles (§10)
+                    Deterministic merge (§9) + profile activation (§10)
                                           ▼
-                        Grafo de interpolación → orden topológico (§8)
+                    Interpolation graph → topological order (§8)
                                           ▼
-                        Coerción + validación contra Schema IR (§7, §11)
+                    Coercion + validation against the Schema IR (§7, §11)
                                           ▼
-                     ┌──── Snapshot inmutable + procedencia (§13) ────┐
-                     │  claves planas · interning · arena · inmutable │
-                     └───────────────────┬───────────────────────────┘
-                                         ▼
-                          Decode tipado (una vez)  |  Mapping (dict mode)
+                    ┌──── Immutable snapshot + provenance (§13) ────┐
+                    │  flat keys · interning · immutable             │
+                    └───────────────────┬───────────────────────────┘
+                                        ▼
+                          Typed decode (once)  |  Mapping (dict mode)
 ```
 
-- **`PropertySource`**: unidad enchufable con `tier` (banda) y `order` (posición
-  dentro de la banda). La precedencia no es una lista rígida hardcodeada.
-- **`Snapshot`**: árbol de claves plano, inmutable, compartible entre hilos, con swap
-  atómico en `refresh()`.
-- **`Schema IR`**: descripción serializable del modelo que Python genera y Rust
-  consume. Es el contrato de compatibilidad entre ambos mundos.
+- **`PropertySource`**: pluggable unit with a `tier` (band) and an `order` (position inside
+  the band). Precedence is not a hardcoded rigid list.
+- **`Snapshot`**: flat key tree, immutable, shareable between threads, with an atomic swap
+  in `refresh()`.
+- **`Schema IR`**: serialisable description of the model that Python generates and Rust
+  consumes. It is the compatibility contract between both worlds.
 
 ---
 
-## 4. Precedencia
+## 4. Precedence
 
-Bandas de mayor a menor prioridad. Dentro de una banda, `order` ascendente; el último
-en aplicarse gana.
+Bands from highest to lowest priority. Inside a band, ascending `order`; the last one
+applied wins.
 
-| Banda | Origen | Notas |
+| Band | Origin | Notes |
 |---|---|---|
-| 0 | Overrides de test / programáticos | `env.override()`, fixture de pytest |
-| 1 | Argumentos de CLI mapeados | `--db-host=x` → `db.host` |
-| 2 | Variables de entorno del SO | prefijo `APP_`, `*_FILE` para secretos |
-| 3 | Ficheros del perfil activo | el último perfil gana; el último documento gana |
-| 4 | Ficheros base | la última ubicación gana |
-| 5 | Defaults del esquema | `???` = obligatorio ausente (sentinel, no `None`) |
-| 6 | Defaults de código | declarados en el modelo |
+| 0 | Test / programmatic overrides | `env.override()`, pytest fixture |
+| 1 | Mapped CLI arguments | `--db-host=x` → `db.host` |
+| 2 | OS environment variables | `APP_` prefix, `*_FILE` for secrets |
+| 3 | Files of the active profile | the last profile wins; the last document wins |
+| 4 | Base files | the last location wins |
+| 5 | Schema defaults | `???` = required and absent (a sentinel, not `None`) |
+| 6 | Code defaults | declared in the model |
 
-Reglas adicionales:
+Additional rules:
 
-- Una fuente puede declarar `tier` reservado (0–6) o insertarse **antes/después de otra
-  fuente concreta** (`insert_before="env"`). Esto evita el clásico "mi fuente no encaja".
-- Un documento importado (`config.import`) se trata como **inmediatamente inferior** al
-  documento que lo importa, no como una fuente independiente.
-- El orden es **determinista** y no depende del orden de `os.environ` ni del
-  filesystem. Mismo input → mismo `dump()` byte a byte.
-
----
-
-## 5. Orígenes
-
-### 5.1 Formatos locales (v1)
-
-YAML, TOML, JSON, INI, `.properties`, `.env`, y **YAML multi-documento**.
-
-Requisito técnico: los parsers deben conservar **spans** (línea/columna) porque
-`explain` los expone. Esto condiciona las dependencias (ver §17.3).
-
-### 5.2 Descubrimiento de ficheros
-
-- `search_paths` explícito; si falta: `./config`, `.`, `$XDG_CONFIG_HOME/keydex`,
-  directorio del paquete consumidor, y `KEYDEX_CONFIG_*` si se define.
-- Ficheros por perfil: `app.yaml`, `app-prod.yaml`, `app-prod-eu.yaml`.
-- Prefijos de URI: `file:`, `optional:` (`optional:file:./x.yaml` no falla si no existe).
-- `imports:` dentro de un documento, resueltos en profundidad con detección de ciclos.
-
-### 5.3 Entorno
-
-- Prefijo configurable (`env_prefix="APP_"`), strip y lowercase.
-- Sintaxis: ver §6.
-- `*_FILE`: si `APP_DB_PASSWORD_FILE` existe, el valor se lee del fichero y se marca
-  como secreto. Nunca se mezcla con `APP_DB_PASSWORD` (gana `*_FILE`).
-
-### 5.4 Otros (v1.1+)
-
-CLI args, `random.*` (int, uuid, port) por arranque, y sources remotas por plugin
-(Vault, KMS, S3, Consul, etcd, keyring, 1Password, Bitwarden, SOPS).
+- A source may declare a reserved `tier` (0–6) or be inserted **before/after another
+  specific source** (`insert_before="env"`). This avoids the classic "my source does not
+  fit". *Planned.*
+- An imported document (`config.import`) is treated as **immediately below** the importing
+  document, not as an independent source. *Planned (§9.3).*
+- The order is **deterministic** and does not depend on `os.environ` order or on the
+  filesystem. Same input → same `dump()` byte for byte.
 
 ---
 
-## 6. Binding relajado
+## 5. Sources
 
-Con esquema, el binding **no adivina**: el esquema desambigua.
+### 5.1 Local formats
 
-### 6.1 Normalización de claves de config
+**Implemented:** YAML (through `saphyr`), TOML (through `toml_edit`) and JSON (through
+`jsonc-parser`, which also accepts JSONC).
 
-`dbHost`, `db-host`, `db_host`, `DB_HOST` son la misma clave. La forma canónica es
-`snake_case` con `.` para niveles y `[i]` para índices.
+**Planned:** INI, `.properties`, `.env` and YAML multi-document.
 
-### 6.2 Variables de entorno → claves
+Technical requirement: parsers must preserve **spans** (line/column) because `explain`
+exposes them. That drives the dependency choice (§17.3).
 
-| Env var (`APP_` stripped) | Resultado |
+### 5.2 File discovery
+
+- Explicit `files` list. **Implemented.**
+- Profile files by convention: `app.yaml` + `prod` → `app-prod.yaml`, in the same directory.
+  **Implemented.**
+- `search_paths`, `file:`/`optional:` URI prefixes and environment-based discovery.
+  *Planned.*
+- `imports:` inside a document, resolved in depth with cycle detection. *Planned (§9.3).*
+
+### 5.3 Environment
+
+- Configurable prefix (`env_prefix="APP_"`), stripped and lowercased. **Implemented.**
+- Syntax: see §6.
+- `*_FILE`: if `APP_DB_PASSWORD_FILE` exists, the value is read from the file and never
+  mixed with `APP_DB_PASSWORD`. Implemented in the Python layer, not in the core, so the
+  engine stays free of filesystem access. **Implemented.**
+
+### 5.4 Other sources
+
+CLI arguments, `random.*` (int, uuid, port) per boot, and remote sources through plugins
+(Vault, KMS, S3, Consul, etcd, keyring, 1Password, Bitwarden, SOPS). *Planned, v1.1+.*
+
+---
+
+## 6. Relaxed binding
+
+With a schema, binding **does not guess**: the schema disambiguates.
+
+### 6.1 Key normalisation
+
+`dbHost`, `db-host`, `db_host`, `DB_HOST` are the same key. The canonical form is
+`snake_case` with `.` between levels and `[i]` for indices.
+
+### 6.2 Environment variables → keys
+
+| Environment variable (`APP_` stripped) | Result |
 |---|---|
-| `DB_HOST` | `db.host` (resuelto con el esquema) |
-| `DB__HOST` | `db.host` (nivel explícito) |
-| `SERVERS__0__HOST` | `servers[0].host` |
-| `LABELS__TEAM_A` | `labels.team_a` (mapa dinámico) |
+| `DB_HOST` | `db.host` (resolved against the schema) |
+| `DB__HOST` | `db.host` (explicit level) |
+| `SERVERS__0__HOST` | `servers[0].host` *(environment binding of lists: planned)* |
+| `LABELS__TEAM_A` | `labels.team_a` *(dynamic maps: planned)* |
 
-Algoritmo:
+Implemented algorithm:
 
-1. Strip de prefijo, lowercase.
-2. Se construye un trie con las rutas del esquema.
-3. Match **exacto** sobre la forma normalizada; si falla, match **greedy por segmentos
-   más largos** contra el trie.
-4. Si dos rutas del esquema empatan → `AmbiguousBinding` (error, con las dos candidatas).
-5. Los mapas dinámicos (`dict[str, T]`, campos indexados) **exigen** `__` como
-   separador de nivel, porque el esquema no puede desambiguar.
+1. Strip the prefix (case-insensitive) and lowercase the remainder.
+2. Replace `__` with `.` to obtain the **dotted** form.
+3. Look up the dotted form in the map of schema paths. If it matches, that is the binding.
+4. Otherwise look up the **relaxed** form (dots replaced by `_`).
+5. If two schema paths tie in the relaxed form → `AmbiguousBinding` error listing both
+   candidates.
+6. An exact dotted match always beats a relaxed one.
 
-**Modo diccionario (sin esquema):** `__` es obligatorio como separador de nivel y `_`
-es literal. Determinista y sin heurísticas. Esta es la razón por la que el modo tipado
-es el camino principal.
+**Dictionary mode (no schema):** `__` is mandatory as a level separator and `_` is literal.
+Deterministic and heuristic-free. That is why typed mode is the main path.
 
-### 6.3 Colisiones
+### 6.3 Collisions
 
-Si dos campos del modelo normalizan al mismo nombre → error de esquema en `load()`, no
-en runtime.
+If two model fields normalise to the same name, the IR is rejected at `load()` time, not at
+runtime. *Planned: explicit validation of the IR.*
 
 ---
 
-## 7. Tipos y coerción
+## 7. Types and coercion
 
-### 7.1 Tipos soportados
+### 7.1 Supported types
 
-`str`, `int`, `float`, `decimal.Decimal`, `bool`, `Path`, `Enum`, `datetime`/`date`/`time`
-(con o sin TZ), `UUID`, `IPv4Address`/`IPv6Address`, `duration`, `size`, `rate`, `URL`,
-`Secret[T]`, `Optional[T]`, `Union[T, ...]` (con discriminador), `Literal[...]`,
-`list[T]`, `tuple[...]`, `set[T]`, `dict[str, T]`, dataclasses anidadas, `attrs`,
-`pydantic` (vía JSON Schema), `msgspec.Struct`, `TypedDict`, `NamedTuple`.
+**Implemented:** `str`, `int`, `float`, `bool`, `Optional[T]`, `list[T]`, nested
+dataclasses, `Enum`, `Path`, `Decimal`, `UUID`, `Secret[T]`.
 
-### 7.2 Reglas de coerción
+**Planned:** `datetime`/`date`/`time`, `IPv4Address`/`IPv6Address`, `duration`, `size`,
+`rate`, `URL`, discriminated `Union`, `Literal`, `tuple`, `set`, `dict[str, T]`, `attrs`,
+`pydantic` (through JSON Schema), `msgspec.Struct`, `TypedDict`, `NamedTuple`.
 
-| Tipo | Acepta (modo `relaxed`) |
+### 7.2 Coercion rules
+
+| Type | Accepts (`relaxed` mode) |
 |---|---|
 | `bool` | `true/false`, `yes/no`, `on/off`, `1/0` (case-insensitive) |
-| `int` | `"42"`, `"0x1F"`, `"1_000"` |
-| `Decimal` | str exacto, nunca float |
-| `duration` | `250ms`, `5s`, `3m`, `2h`, `1d`, `PT5M` |
-| `size` | `10MB`, `1GiB` (binario vs decimal explícito) |
-| `rate` | `100/s`, `5MB/s` |
-| `Path` | str; `~` **no** se expande salvo `expand_user=True` |
-| `Enum` | nombre o valor; case-insensitive en relaxed |
-| `datetime` | ISO-8601; naive → error en strict |
+| `int` | `42`, `"42"` |
+| `float` | `3.14`, `"3.14"`, integers |
+| `Enum` | name or value, case-insensitive in relaxed mode |
+| `Path` | `str`; `~` is **not** expanded |
+| `Decimal` | exact `str`, never `float` |
+| `datetime` | ISO-8601; naive → error in strict mode. *Planned.* |
+| `duration` | `250ms`, `5s`, `3m`, `2h`, `1d`, `PT5M`. *Planned.* |
+| `size` | `10MB`, `1GiB` (binary vs decimal explicit). *Planned.* |
+| `rate` | `100/s`, `5MB/s`. *Planned.* |
 
-Tres modos: `strict` (solo conversiones sin pérdida), `relaxed` (por defecto, tabla
-anterior), `lenient` (mejor esfuerzo). **Nunca** `"false"` → `True`, ni float → int con
-pérdida, ni truncado silencioso de strings.
+Modes: `strict` (lossless conversions only), `relaxed` (default, table above), `lenient`
+(best effort). **Never** `"false"` → `True`, never a lossy float → int, never silent string
+truncation. *Only `relaxed` is implemented today.*
 
-### 7.3 Sentinel `MISSING`
+### 7.3 `MISSING` sentinel
 
-`???` significa "obligatorio y ausente". No es `None`. Solo `MISSING` dispara error de
-requerido; `Optional[T]` admite `None` explícito desde config.
+`???` means "required and absent". It is not `None`. Only `MISSING` triggers a required
+error; `Optional[T]` accepts an explicit `None` from configuration. **Planned:** today a
+missing scalar is a required error, and `Optional` without a value resolves to `None`.
 
 ---
 
-## 8. Interpolación
+## 8. Interpolation
 
-### 8.1 Sintaxis
+### 8.1 Syntax
 
-| Forma | Significado |
-|---|---|
-| `${db.host}` | Referencia absoluta |
-| `${.sibling}` | Referencia relativa (hermano) |
-| `${..parent.key}` | Relativa hacia arriba |
-| `${db.host:-localhost}` | Con valor por defecto |
-| `${env:HOME}` | Resolver `env` |
-| `${env:NOPE:-fallback}` | Resolver con default |
-| `\${...}` | Escape literal |
-| `${a:-${b}}` | Defaults anidados |
+| Form | Meaning | Status |
+|---|---|---|
+| `${db.host}` | Absolute reference | Implemented |
+| `${db.host:-localhost}` | With a default value | Implemented |
+| `${env:HOME}` | `env` resolver | Implemented |
+| `${env:NOPE:-fallback}` | Resolver with default | Implemented |
+| `${a:-${b}}` | Nested defaults | Implemented |
+| `\${...}` | Literal escape | Implemented |
+| `${.sibling}` | Relative reference (sibling) | Planned |
+| `${..parent.key}` | Upward relative reference | Planned |
 
-`${...}` hereda el tipo del valor referenciado; `"${...}"` lo fuerza a string.
+A string that is exactly one placeholder inherits the type of the referenced value;
+`"${...}"` inside a larger string is rendered as text.
 
-### 8.2 Semántica
+### 8.2 Semantics
 
-- Resolución en **orden topológico una sola vez**, cacheada en el snapshot → coste cero
-  por acceso.
-- Ciclos → error con la **traza completa** del ciclo, no un mensaje genérico.
-- Referencia a clave inexistente sin default → error en `strict`, `MISSING` en otro caso.
-- Se resuelven también claves que no se llegan a leer si el modo es `strict`
-  (`validate_all=True`), para detectar config muerta antes de desplegar.
+- Resolved **once, in topological order**, memoised in the snapshot → zero cost per access.
+- Cycles → error with the **full trace** of the cycle, not a generic message.
+- Reference to a missing key without a default → `MissingReference` error.
+- Values that are never read are still resolved, so dead references fail at load time.
 
 ### 8.3 Resolvers
 
-Registrables desde Python, ejecutables en Rust los built-in:
+`env` is implemented. **Planned:** `base64`, `int`, `float`, `bool`, `list`, `json`,
+`uuid`, and Python-registered resolvers.
 
-`env`, `base64`, `int`, `float`, `bool`, `list`, `json`, `uuid`.
-
-- Argumentos separados por `,`, escapables con `\,`.
-- `file:` existe pero **desactivado por defecto** (lee rutas arbitrarias: footgun).
-- Un resolver debe ser **puro**. No hay acceso a red ni a estado global desde el core.
-- No existe lenguaje de expresiones: nada de aritmética, condicionales ni acceso a
-  métodos. Si algún día se quiere, va como plugin y nunca en el core.
+- Arguments separated by `,`, escapable with `\,`. *Planned.*
+- `file:` would read arbitrary paths: disabled by default and never enabled implicitly.
+- A resolver must be **pure**. No network and no global state from the core.
+- There is no expression language: no arithmetic, conditionals or method access. If it is
+  ever wanted, it ships as a plugin and never in the core.
 
 ---
 
-## 9. Composición y merge
+## 9. Composition and merge
 
-### 9.1 Reglas por defecto
+### 9.1 Default rules (implemented)
 
-- Mapas: merge profundo.
-- Listas: **reemplazo** (como Spring), no concatenación.
-- Escalares: el último gana.
+- Maps: deep merge.
+- Lists: **replacement** (like Spring), not concatenation.
+- Scalars: the last one wins.
 
-### 9.2 Marcadores de intención
+### 9.2 Intent markers *(planned)*
 
 ```yaml
 servers:
@@ -282,47 +290,41 @@ labels:
   _delete_: [obsolete]
 ```
 
-`keyed:<campo>` fusiona listas de structs por identidad, reportando duplicados.
+`keyed:<field>` merges lists of structs by identity, reporting duplicates.
 
-### 9.3 Includes
+### 9.3 Includes *(planned)*
 
-`imports:` / `includes:` resueltos antes del merge, con profundidad máxima configurable
-y detección de ciclos. Un import hereda el perfil activo del importador salvo que
-declare lo contrario.
+`imports:` / `includes:` resolved before the merge, with a configurable maximum depth and
+cycle detection. An import inherits the importer's active profile unless it declares
+otherwise.
 
-> **Estado:** no implementado. Depende de que la capa que llama resuelva los ficheros
-> (el core no toca el sistema de ficheros), así que vive en el binding y no en el motor.
-> Pendiente para F3.1.
-
----
-
-## 10. Perfiles
-
-- Activación: config (`profiles.active`), entorno (`APP_PROFILES_ACTIVE`), CLI
-  (`--profile`). Precedencia: CLI > entorno > fichero.
-- `profiles.include`: añade perfiles sin reemplazar los activos.
-- `profiles.group`: alias (`prod` → `prod,metrics,tracing`).
-- Activación condicional por documento:
-
-```yaml
----
-activate:
-  on_profile: prod
-  on_property: feature.new_db   # solo si esa clave existe
-db:
-  host: db.prod.internal
-```
-
-- Orden de merge: perfiles en el orden declarado; el último gana. Documentado y con
-  tests dorados.
-- Perfil `test` disponible como fixture de pytest que aísla el entorno.
+> **Status:** not implemented, and it cannot live in the core: the calling layer must
+> resolve the files, because the core does not touch the filesystem. Pending for F3.1.
 
 ---
 
-## 11. Schema IR (contrato de compatibilidad)
+## 10. Profiles
 
-JSON versionado, generado por Python y consumido por Rust. Es la superficie pública
-que se mantiene estable.
+**Implemented:** activation by file convention plus a dedicated band.
+
+- `app.yaml` is the base (`BaseFile` band); `app-<profile>.yaml` is the overlay
+  (`ProfileFile` band, above the base).
+- A profile file that does not exist is ignored; an optional profile must not break
+  startup.
+- With several profiles, the last one in the list wins.
+- The environment always wins over any profile (band 2 vs band 3).
+
+**Planned:** activation through configuration (`profiles.active`), environment
+(`APP_PROFILES_ACTIVE`) and CLI; `profiles.include`; `profiles.group`; per-document
+conditional activation (`activate.on_profile`, `on_property`); a `test` profile shipped as a
+pytest fixture.
+
+---
+
+## 11. Schema IR (compatibility contract)
+
+Versioned JSON, generated by Python and consumed by Rust. It is the public surface kept
+stable across releases.
 
 ```json
 {
@@ -347,110 +349,105 @@ que se mantiene estable.
 }
 ```
 
-Tipos soportados en v1: `str`, `int`, `float`, `bool`, `any`, `struct`, `optional`,
-`list`. El campo `converter` indica a la capa de Python qué conversión rica aplicar
-después (`enum`, `path`, `decimal`, `uuid`): el motor no conoce esos tipos.
+Types in v1: `str`, `int`, `float`, `bool`, `any`, `struct`, `optional`, `list`. The
+`converter` field tells the Python layer which rich conversion to apply afterwards
+(`enum`, `path`, `decimal`, `uuid`, `secret`): the engine does not know those types.
 
-Reglas de evolución:
+Evolution rules:
 
-- Dentro de `v1`, solo cambios **aditivos** (campos nuevos opcionales).
-- Cualquier ruptura → `keydex.schema/v2` y soporte simultáneo.
-- El IR es también la base de: `.pyi` generado, JSON Schema exportado para docs,
-  `keydex schema`, y (futuro) validación desde otros lenguajes.
+- Inside `v1`, only **additive** changes (new optional fields).
+- Any break → `keydex.schema/v2` with simultaneous support.
+- The IR is also the basis for exported JSON Schema, `keydex schema`, and (future)
+  validation from other languages.
 
-Snapshot exportable (para tests dorados y CLI):
-
-```json
-{
-  "ir": "keydex.snapshot/v1",
-  "values": { "db.host": "db.internal" },
-  "provenance": {
-    "db.host": {
-      "source": "env", "raw": "APP_DB__HOST", "tier": 2,
-      "shadowed": [{ "source": "file", "file": "app.yaml", "line": 4 }],
-      "interpolation": []
-    }
-  }
-}
-```
+Fields with a default and a missing value are omitted from the coerced tree so the
+dataclass default applies: a single source of truth for defaults.
 
 ---
 
-## 12. Validación y errores
+## 12. Validation and errors
 
-- Validación en Rust desde el IR: tipos, `required`, rangos, regex, longitudes,
-  cardinalidad, validadores custom registrados por nombre.
-- **Errores agregados**, no fail-fast. Formato por error:
+Implemented:
+
+- Type validation and `required` detection from the IR.
+- **Aggregated errors**, not fail-fast. Shape per error:
 
 ```python
-{ "path": "db.port", "message": "must be <= 65535", "value": 70000,
-  "source": {"file": "app.yaml", "line": 12}, "suggestion": None }
+{"path": "db.port", "message": "expected an integer, got \"many\""}
 ```
 
-- Claves desconocidas: `on_unknown = "error" | "warn" | "ignore"` (por defecto `warn`),
-  con sugerencia por distancia de edición (`db.hots` → *did you mean `db.host`?*).
-- Jerarquía de excepciones: `KeydexError` → `SchemaError`, `ParseError`,
-  `BindingError`, `ValidationError`, `InterpolationError`, `SecretError`, `SourceError`.
-  Todas con `path` y `details` estructurados.
+- Unknown keys: `on_unknown = "warn" | "error" | "ignore"` (default `warn`), with an
+  edit-distance suggestion (`db.prot` → *unknown key, did you mean "db.port"?*). The
+  suggestion also works when the level is nested wrongly (`app.name` → `name`).
+- Exception hierarchy: `KeydexError` → `ValidationError`; `UnknownKeyWarning` is a
+  `UserWarning`, not an exception.
+
+**Planned:** ranges, regex, lengths, cardinality, custom validators, and a finer
+exception hierarchy (`SchemaError`, `ParseError`, `BindingError`, `InterpolationError`,
+`SecretError`, `SourceError`).
 
 ---
 
-## 13. Procedencia
+## 13. Provenance
 
-`explain(key)` devuelve un objeto, no un string formateado (el formateo es de cada
+`explain(key)` returns an object, not a formatted string (formatting belongs to each
 frontend):
 
 ```python
 cfg.explain("db.host")
-# Explanation(
-#   key="db.host", type=str, value="db.internal",
-#   winner=Origin(source="env", raw="APP_DB__HOST", tier=2),
-#   shadowed=[Origin(source="file", file="app.yaml", line=4)],
-#   interpolation=["db.suffix"],
-#   redacted=False,
-# )
+# {
+#   "key": "db.host",
+#   "value": "db.internal",
+#   "winner":   {"source": "env", "tier": 2, "file": None, "line": None, "col": None},
+#   "shadowed": [{"source": "file:app.yaml", "tier": 4,
+#                 "file": "app.yaml", "line": 4, "col": 8}],
+#   "refs": ["db.suffix"],
+# }
 ```
 
-Reglas:
+Rules:
 
-- `shadowed` incluye **todos** los orígenes que definieron la clave y perdieron.
-- Si el valor viene de un secreto, `value` es `None` y `redacted=True` salvo
-  `reveal=True` explícito.
-- `dump(format=...)` es determinista y redactado por defecto.
-- CLI equivalente: `python -m keydex explain db.host`.
-
----
-
-## 14. Secretos
-
-- Tipo `Secret[T]`: `repr`, `str`, `format`, `pformat`, logs y trazas → `********`.
-  Valor real solo con `.reveal()`.
-- Indirección `*_FILE` para Docker/K8s secrets.
-- `zeroize` en Rust para los buffers que contienen secretos.
-- Garantías de no-fuga verificadas con tests: `dump`, `explain`, `repr`, mensajes de
-  error de validación, JSON Schema exportado.
-- Fuentes: `keyring` (v1.1), Vault/1Password/Bitwarden/SOPS (plugin).
+- `shadowed` includes **every** origin that defined the key and lost, oldest first.
+- Redaction for secrets is enforced by the `Secret` type on the Python side, not by
+  `explain` (there is no schema at that point). *Planned: `redacted` flag and `reveal`
+  parameter.*
+- `dump` is deterministic. The CLI prints JSON in key order.
+- CLI equivalent: `python -m keydex explain db.host`.
 
 ---
 
-## 15. Ciclo de vida y recarga
+## 14. Secrets
 
-- `load()` construye un snapshot inmutable.
-- `refresh()`: vuelve a leer las fuentes, valida, y **solo entonces** hace swap atómico.
-  Si falla, el snapshot vigente sigue sirviendo y el error se reporta. Nunca se deja la
-  aplicación con config parcial.
-- `watch()` (v2): `notify` + debounce, callbacks `on_change(keys)`.
-- Thread safety: snapshot inmutable compartido; overrides por `contextvar` para
-  tests concurrentes y por-request.
-- Fork safety: sin file descriptors ni hilos vivos en el hijo; documentado.
-- `close()` para liberar el watcher (v2).
+- `Secret[T]`: `repr`, `str`, `format`, logs and traces → `Secret('***')`. The real value
+  only through `.reveal()`.
+- `*_FILE` indirection for Docker/K8s secrets.
+- Typed models accept `Secret[str]`; the IR marks it with `converter: "secret"`.
+- Non-leak guarantees verified by tests: `repr`, the demo output, and the dataclass.
+
+**Planned:** `zeroize` for buffers holding secrets in Rust, redaction in `dump`/`explain`,
+and remote secret sources (keyring, Vault, 1Password, Bitwarden, SOPS).
 
 ---
 
-## 16. API Python
+## 15. Lifecycle and reload
+
+- `load()` builds an immutable snapshot.
+- `refresh()` (dictionary mode): re-reads the sources, validates and **only then** swaps
+  atomically. If it fails, the current snapshot keeps serving and the error is reported.
+  Configuration is never left half applied. **Implemented.**
+- A typed model is an immutable copy: to reload, call `load()` again.
+- Thread safety: shared immutable snapshot; the `Settings` handle holds it behind an
+  `RwLock` that is only taken on `refresh()`.
+- `watch()` (v2): `notify` plus debounce, `on_change(keys)` callbacks.
+- Per-request overrides through `contextvar`. *Planned.*
+
+---
+
+## 16. Python API
 
 ```python
-from keydex import load, Settings, Secret, MISSING, override
+from dataclasses import dataclass, field
+from keydex import Secret
 
 @dataclass(frozen=True)
 class Db:
@@ -462,46 +459,46 @@ class Db:
 class App:
     db: Db
     debug: bool = False
-    profiles: list[str] = field(default_factory=list)
 
-cfg = load(App, profiles=["prod"], env_prefix="APP_")
-cfg.db.host                    # acceso nativo, sin FFI
-cfg.explain("db.host")         # procedencia
-cfg.dump("yaml", redact=True)
-cfg.refresh()
+cfg = keydex.load(App, files=["app.yaml"], env_prefix="APP_", profiles=["prod"])
+cfg.db.host                 # native access, no FFI
 ```
 
 ```python
 def load(
-    model: type[T] | None = None,
+    model: type[T],
     *,
-    sources: Sequence[Source] | None = None,
-    profiles: Sequence[str] | None = None,
+    files: Sequence[str] = (),
     env_prefix: str = "",
-    search_paths: Sequence[PathLike] | None = None,
-    mode: Literal["relaxed", "strict", "lenient"] = "relaxed",
-    on_unknown: Literal["error", "warn", "ignore"] = "warn",
-    expand_user: bool = False,
-    sources_order: Sequence[str] | None = None,
-) -> T | Settings: ...
+    env: Mapping[str, str] | None = None,
+    profiles: Sequence[str] = (),
+    on_unknown: Literal["warn", "error", "ignore"] = "warn",
+) -> T: ...
+
+def load_settings(
+    files: Sequence[str] = (),
+    env_prefix: str = "",
+    env: Mapping[str, str] | None = None,
+    profiles: Sequence[str] = (),
+) -> Settings: ...
 
 class Settings(Mapping[str, Any]):
     def get(self, key: str, default: Any = None) -> Any: ...
-    def explain(self, key: str, *, reveal: bool = False) -> Explanation: ...
-    def dump(self, fmt: str = "yaml", *, redact: bool = True) -> str: ...
+    def explain(self, key: str) -> dict | None: ...
     def refresh(self) -> None: ...
-    def override(self, key: str, value: Any) -> ContextManager[None]: ...
 ```
 
-- **Sin singleton global** por defecto. Helper opcional `keydex.current()` para
-  ergonomía, nunca obligatorio.
-- Integraciones v1: pytest fixture, `logging`/`structlog` reconfiguration, FastAPI
-  (`Depends` + lifespan), Click/Typer. Django settings shim en v2.
-- CLI: `python -m keydex validate | explain | dump | schema`.
+- **No global singleton.** Call `load` where the configuration is needed and pass it as a
+  dependency.
+- `env` lets a test inject its own environment; when omitted, `os.environ` is used.
+- CLI: `python -m keydex explain|dump`.
+
+**Planned integrations:** pytest fixture, `logging`/`structlog` reconfiguration, FastAPI
+(`Depends` + lifespan), Click/Typer, Django settings shim.
 
 ---
 
-## 17. Arquitectura Rust
+## 17. Rust architecture
 
 ### 17.1 Crates
 
@@ -509,388 +506,313 @@ class Settings(Mapping[str, Any]):
 keydex/
 ├── Cargo.toml                # workspace
 ├── crates/
-│   ├── keydex-core           # Rust puro, publicable, cero pyo3
-│   └── keydex-py             # PyO3: adaptadores y mapeo de errores
-├── python/keydex/            # capa Python pura
-├── tests/                    # integración Python
-└── benches/                  # criterion + pytest-codspeed
+│   ├── keydex-core           # pure Rust, publishable, zero pyo3
+│   └── keydex-py             # PyO3: adapters and error mapping
+├── python/keydex/            # pure Python layer
+├── python/tests/             # Python integration tests
+└── python/bench/             # load benchmark
 ```
 
-### 17.2 Módulos de `keydex-core`
+### 17.2 `keydex-core` modules
 
-| Módulo | Responsabilidad |
+| Module | Responsibility |
 |---|---|
-| `source` | `PropertySource` trait, tiers, orden, `EnvSource`, `FileProvider` |
-| `parse` | Parsers con spans (YAML, TOML, JSON, INI, properties, .env) |
-| `tree` | Árbol plano de claves, interning, arena, spans |
-| `merge` | Merge determinista + marcadores |
-| `profile` | Activación, includes, grupos |
-| `interp` | Grafo, topológico, resolvers, ciclos |
-| `schema` | Schema IR (serde), resolución de rutas |
-| `coerce` | Conversión tipada y validadores |
-| `provenance` | Origen, sombreados, `Explanation` |
-| `error` | Enums con `thiserror` |
+| `source` | `Tier`, `SourceId`, raw entries |
+| `parse` | Span-preserving parsers (YAML, TOML, JSON) plus `LineIndex` |
+| `env` | Dictionary-mode environment source |
+| `loader` | `Builder`: precedence, merge, provenance assembly |
+| `interp` | Interpolation graph, cycles, resolvers |
+| `schema` | Schema IR (serde), coercion, validation, relaxed binding, unknown keys |
+| `snapshot` | Immutable snapshot and `Explanation` |
+| `error` | `thiserror` enums |
 
-### 17.3 Dependencias clave
+### 17.3 Key dependencies
 
-- **YAML con spans:** `saphyr` 0.3 (trae `marked_yaml` dentro). Confirmado en el
+- **YAML with spans:** `saphyr` 0.3 (bundles `marked_yaml`). Confirmed in
   [spike 0001](spikes/0001-parsers-spans.md).
-- **TOML con spans:** `toml_edit` 0.25, usando `Document` (no `DocumentMut`, que
-  descarta los spans).
-- **JSON con posiciones:** `jsonc-parser` 0.34. `jiter` se descartó: es más rápido pero
-  no expone posiciones.
-- **`LineIndex` por fichero** para convertir offsets en línea/columna; sin él la
-  conversión es O(n) por clave y el parseo se vuelve cuadrático.
-- `compact_str` / `arcstr` para claves cortas; interner propio.
-- `thiserror`, `serde`, `rayon` (multi-fichero), `zeroize`/`secrecy`.
-- `pyo3` **solo** en `keydex-py`.
+- **TOML with spans:** `toml_edit` 0.25, using `Document` (not `DocumentMut`, which drops
+  spans).
+- **JSON with positions:** `jsonc-parser` 0.34. `jiter` was discarded: faster, but it
+  exposes no positions.
+- **One `LineIndex` per file** to convert offsets into line/column; without it the
+  conversion is O(n) per key and the parse becomes quadratic.
+- `serde` + `serde_json` for the IR (behind the `schema` feature).
+- `thiserror`. **Planned:** `compact_str`/`arcstr`, `rayon`, `zeroize`/`secrecy`.
+- `pyo3` **only** in `keydex-py`.
 
-### 17.4 Feature flags del core
+### 17.4 Core feature flags
 
-`yaml`, `toml`, `json`, `ini`, `dotenv`, `zeroize`, `watch` (v2), `http` (v2).
-Default: formatos locales, sin red ni watcher. Un servicio Rust que solo lee TOML no
-arrastra medio ecosistema.
+`yaml`, `toml`, `json`, `schema` (all on by default). **Planned:** `ini`, `dotenv`,
+`zeroize`, `watch` (v2), `http` (v2). A Rust service that only reads TOML should not pull
+half an ecosystem.
 
-### 17.5 Frontera Python
+### 17.5 Python boundary
 
-- `build(files, env, schema_ir) -> SnapshotHandle` y `refresh()`: los únicos cruces
-  caros. El GIL se libera durante el parseo/merge.
-- El decode tipado produce el objeto final en una sola pasada (estilo `msgspec`).
-- `gil_used = false` en el módulo PyO3, con estado global cacheado bajo `RwLock`.
-
----
-
-## 18. Rendimiento
-
-### 18.1 Presupuestos (gates de CI)
-
-| Métrica | Objetivo |
-|---|---|
-| Cold load, 1k claves YAML + env | < 5 ms |
-| Decode a dataclass de 200 campos | < 150 µs |
-| Acceso a atributo | ±10% vs dataclass nativa (0 FFI) |
-| `refresh()` atómico, 1k claves | < 5 ms |
-| `explain()` | < 100 µs |
-| Memoria del snapshot | < 3× el texto fuente |
-| `import keydex` | < 10 ms |
-
-Comparativa obligatoria en CI contra `omegaconf`, `dynaconf` y `pydantic-settings`,
-con `pytest-codspeed` y umbral de regresión.
-
-### 18.2 Técnicas
-
-Interning de claves, trie de rutas, arena, `Cow<str>`, resolución topológica cacheada,
-`rayon` para múltiples ficheros, GIL liberado en `build`.
+- `build`/`load_typed` and `refresh()` are the only expensive crossings.
+- Typed decode produces the final Python objects in one pass.
+- `gil_used = false` in the PyO3 module; global state behind an `RwLock`.
+- `abi3` is a crate feature (`default = ["abi3"]`); the free-threaded build uses
+  `--no-default-features`.
 
 ---
 
-## 19. Empaquetado y CI
+## 18. Performance
+
+### 18.1 Budgets (CI gates)
+
+| Metric | Target | Measured |
+|---|---|---|
+| Cold load, 1k YAML keys + env | < 5 ms | 1.26 ms |
+| Attribute access | ±10% vs native dataclass (0 FFI) | native |
+| `explain()` | < 100 µs | < 10 µs |
+| Snapshot memory | < 3× the source text | not measured |
+| `import keydex` | < 10 ms | not measured |
+
+**Planned:** mandatory comparison in CI against `omegaconf`, `dynaconf` and
+`pydantic-settings`, with `pytest-codspeed` and a regression threshold.
+
+### 18.2 Techniques
+
+Key interning, a path trie, arena allocation, `Cow<str>`, cached topological resolution,
+`rayon` for multiple files, GIL released during `build`. **Planned**, except for the
+cached resolution which is implemented.
+
+---
+
+## 19. Packaging and CI
 
 ### 19.1 Wheels
 
-| Artefacto | Cubre |
+| Artifact | Covers |
 |---|---|
-| `abi3-py311` | 3.11, 3.12, 3.13, 3.14 (con GIL) |
-| `cp314t` | 3.14 free-threaded |
-| `cp313t` (opcional) | 3.13 free-threaded, etiqueta experimental |
+| `abi3-py311` | 3.11, 3.12, 3.13, 3.14, 3.15 (with the GIL) |
+| `cp314t` | 3.14 free-threaded, `gil_used = false` |
 
-`abi3` y `t` son mutuamente excluyentes: dos perfiles de build con maturin.
-Fijar la versión de PyO3 al iniciar y confirmar el estado de soporte de free-threading
-en ese momento.
+`abi3` and `t` are mutually exclusive today (PEP 803 `abi3t` does not exist yet): two build
+profiles with maturin.
 
-### 19.2 Matriz de CI
+### 19.2 CI matrix
 
-| Job | Contenido |
+| Job | Content |
 |---|---|
-| test | 3.11–3.14 sobre wheel abi3 |
-| test-ft | 3.14t (verifica `sys._is_gil_enabled()` y la suite completa) |
-| fuzz | parsers (cargo-fuzz + atheris) |
-| bench | 3.11 y 3.14t, gate de regresión |
-| lint | `cargo clippy -D warnings` + `deny(panic, unwrap_used, expect_used, disallowed_methods)` en core; `ruff`, `mypy --strict` |
-| gate | `just gate`: falla si `pyo3` aparece en el árbol de dependencias de `keydex-core` |
+| `lint` | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo check -p keydex-py` |
+| `test` | `cargo test` on `keydex-core` |
+| `gate` | `cargo deny` plus the "no `pyo3` in the core" invariant |
+| `python` | builds the wheel with maturin, installs it, runs 44 Python tests |
+| `python-freethreaded` | builds `cp314t`, asserts `sys._is_gil_enabled()` is `False`, runs the suite |
 
-### 19.3 Publicación
+**Planned:** fuzzing, benchmarks with regression gates.
 
-1. `keydex-core` en crates.io cuando el MVP sea usable (0.x, API pequeña, docs.rs con
-   `all-features`).
-2. Wheels en PyPI.
-3. Reservar nombres antes de anunciar (acción manual, es publicación real).
+### 19.3 Publication
+
+1. `keydex-core` on crates.io (0.x, small API, docs.rs with `all-features`).
+2. Wheels on PyPI.
+3. Name reservation happens before announcing (manual action, it is a real publication).
+
+Tags drive `.github/workflows/release.yml`:
+`v*` → sdist + wheels (x86_64/aarch64, manylinux 2.28) + `cp314t` → PyPI through Trusted
+Publishing (OIDC) → `keydex-core` on crates.io through a scoped token. See
+[release](release.md).
 
 ---
 
 ## 20. Testing
 
-- **Tests dorados de precedencia**: matriz completa banda × formato × perfil.
-- **Tests dorados de binding**: tabla de §6.2 completa, incluido el caso ambiguo.
-- **Property-based**: `hypothesis` para merge e interpolación
-  (`merge(a, a) == a`, idempotencia del dump, simetría de `explain`).
-- **Fuzz**: ningún input provoca `panic!` en Rust; todo error cruza como excepción.
-- **Determinismo**: mismo input → mismo `dump()` byte a byte, con `os.environ`
-  desordenado a propósito.
-- **No fugas de secretos**: suite dedicada por cada superficie de salida.
-- **Concurrencia**: lecturas desde N hilos y desde 3.14t.
+Implemented:
+
+- **Precedence tests**: environment over file, order inside a band, shadowing.
+- **Binding tests**: the §6.2 table, including the ambiguous case and exact-over-relaxed.
+- **Span tests**: YAML, TOML and JSON, with line and column assertions.
+- **Interpolation tests**: type inheritance, defaults, escape, cycles, missing references.
+- **Typed model tests**: coercion, aggregated errors, unknown keys, rich converters.
+- **Secret tests**: no leaks in `repr` or program output.
+- **Determinism test**: same input → same key order.
+
+**Planned:** property-based tests (`hypothesis`, `proptest`), fuzzing (`cargo-fuzz`,
+`atheris`), concurrency tests from `3.14t`, and a golden dump comparison with shuffled
+`os.environ`.
 
 ---
 
 ## 21. Roadmap
 
-| Fase | Entregable | Criterio de salida |
+| Phase | Deliverable | Exit criterion |
 |---|---|---|
-| **F0** ✅ | Workspace, `AGENTS.md` + `docs/spec.md` + `just gate`, spikes de parsers con spans, esqueleto de errores | Spans correctos y `just gate` en verde |
-| **F1** ✅ | `keydex-core` (sources, merge, interp, snapshot) + `keydex-py` dict-mode | Carga YAML+env, `${}`, `explain`, benchmark vs OmegaConf |
-| **F2** ✅ | Esquema tipado: dataclasses, coerción, validación agregada | `load(App)` completo con errores con path. `.pyi` generado no hace falta: los dataclasses ya dan tipos a mypy y al IDE |
-| **F3** ✅ | Perfiles por convención de ficheros, secretos (`Secret`, `*_FILE`), `refresh()`, CLI | Suite verde; los secretos no se filtran en `repr` |
-| **F4** | Publicación: wheels abi3 + 314t, crates.io, docs | Instalable desde PyPI en 3.11–3.14t |
-| **F5 (v2)** | `watch()`, fuentes remotas async, plugin de composición tipo Hydra | Solo con demanda real |
+| **F0** ✅ | Workspace, `AGENTS.md` + `docs/spec.md` + gates, parser spans spike, error skeleton | Correct spans and `./scripts/gate.sh` green |
+| **F1** ✅ | `keydex-core` (sources, merge, interp, snapshot) + `keydex-py` dict mode | YAML+env load, `${}`, `explain`, benchmark vs OmegaConf |
+| **F2** ✅ | Typed schema: dataclasses, coercion, aggregated validation | `load(App)` complete with per-path errors. Generated `.pyi` is not needed: dataclasses already type mypy and the IDE |
+| **F3** ✅ | Profiles by file convention, secrets (`Secret`, `*_FILE`), `refresh()`, CLI | Suite green; secrets do not leak in `repr` |
+| **F3.1** ✅ | Unknown keys (`on_unknown`) with edit-distance suggestions | Warning raised on a real migration mistake |
+| **F4** | Publication: wheels, crates.io, docs | Installable from PyPI on 3.11–3.14t |
+| **F5 (v2)** | `watch()`, async remote sources, Hydra-style composition plugin | Only with real demand |
 
-Dogfooding desde F1: `cleanyourtv`, `f95downloader`, `pirate-scanner`.
-
----
-
-## 22. No-objetivos
-
-- Contenedor de inyección de dependencias.
-- Ciclo de vida de beans estilo Spring.
-- Lenguaje de expresiones en la interpolación.
-- FFI multi-lenguaje (Go/C#/Java/Kotlin), wasm.
-- Hot reload activado por defecto.
-- Mutación del esquema en runtime.
+Dogfooding: `examples/homelab-demo` exercises the full surface. The next step is migrating
+one real module of a non-Python-shaped project.
 
 ---
 
-## 23. Riesgos y mitigaciones
+## 22. Non-goals
 
-| Riesgo | Mitigación |
+- Dependency injection container.
+- Spring-style bean lifecycle.
+- Expression language in interpolation.
+- Multi-language FFI (Go/C#/Java/Kotlin), wasm.
+- Hot reload enabled by default.
+- Schema mutation at runtime.
+
+---
+
+## 23. Risks and mitigations
+
+| Risk | Mitigation |
 |---|---|
-| Deriva Python↔Rust del Schema IR | IR versionado + tests cruzados con fixtures compartidos |
-| Parsers sin spans suficientes | **Resuelto en F0**: los tres formatos dan spans ([spike 0001](spikes/0001-parsers-spans.md)) |
-| Binding ambiguo en modo diccionario | Regla estricta `__`, documentada y testeada |
-| `abi3` vs free-threading divergen | Dos perfiles de build; CI dedicado a `t` |
-| Scope creep hacia framework | Lista de no-objetivos en el README y revisión por fase |
-| Sobrecoste de procedencia en memoria | Provenance solo para claves que participan; interning |
+| Python↔Rust drift of the Schema IR | Versioned IR + cross tests with shared fixtures |
+| Parsers without enough spans | **Resolved in F0**: all three formats give spans ([spike 0001](spikes/0001-parsers-spans.md)) |
+| Ambiguous binding in dictionary mode | Strict `__` rule, documented and tested |
+| `abi3` vs free-threading diverge | Two build profiles; a dedicated `t` job |
+| Scope creep towards a framework | Non-goals in the README and per-phase review |
+| Provenance memory overhead | Provenance only for participating keys; interning |
 
 ---
 
-## 24. Documentación para el agente
+## 24. Agent documentation
 
-El plan vive en `~/.opencode/plan/`, **fuera del repo**: un agente que trabaje en
-`keydex` no lo verá. Por eso la documentación de trabajo se muda al repo en F0, en
-cuatro capas:
+The working documentation lives in the repository, in four layers:
 
-| Capa | Fichero | Contenido | Por qué existe |
+| Layer | File | Content | Why it exists |
 |---|---|---|---|
-| Reglas | `AGENTS.md` | imperativo y verificable, ≤100 líneas | se carga solo en cada sesión |
-| Contexto | `docs/spec.md` | esta especificación | el "por qué" y los contratos |
-| Decisiones | `docs/adr/NNNN-*.md` | una ADR por decisión irreversible | evita re-litigar y perder el motivo |
-| **Ejecución** | CI + `just gate` | lo que un test puede comprobar | **la prosa se ignora; un build rojo no** |
+| Rules | `AGENTS.md` | imperative and verifiable, ≤100 lines | loaded on every session |
+| Context | `docs/spec.md` | this specification | the "why" and the contracts |
+| Decisions | `docs/adr/NNNN-*.md` | one ADR per irreversible decision | stops re-litigating and losing the reason |
+| **Execution** | CI + `./scripts/gate.sh` | what a test can check | **prose is ignored; a red build is not** |
 
-### 24.1 `AGENTS.md` (raíz del repo)
+There is also `crates/keydex-core/AGENTS.md`, loaded when working inside that subtree.
 
-> Borrador de trabajo. La versión vigente es el `AGENTS.md` de la raíz del repo; esta
-> se conserva para no perder el razonamiento.
+### 24.1 Rule → enforcement mechanism
 
-```markdown
-# keydex — instrucciones del proyecto
-
-Especificación: `docs/spec.md`. Decisiones: `docs/adr/`. Léelos antes de tocar
-`crates/`. Si el código y la spec discrepan, gana la spec: pregunta antes de cambiarla.
-
-## Qué es keydex
-Acceso a configuración: tipado, con procedencia y rápido.
-
-## Qué NO es (no lo añadas aunque parezca útil)
-Contenedor DI · motor de expresiones · framework de aplicación · FFI multi-lenguaje ·
-hot reload por defecto · validación en Python.
-
-## Reglas duras
-1. `keydex-core` NO depende de `pyo3`.           → `just gate`
-2. `keydex-core` NO lee entorno, reloj ni FS.    → `just gate`
-3. Errores = enums `thiserror`. Nunca `String`.  → clippy `panic`/`unwrap_used`
-4. Cero estado global mutable; caches con `RwLock`.
-5. Ningún acceso a atributo cruza FFI; solo `build` y `refresh`.
-6. Toda clave expuesta en `explain` conserva su span.
-
-## Prohibiciones
-- No `serde_yaml` (archivado, sin spans): usa `saphyr`/`marked_yaml`.
-- No `unwrap`/`expect`/`panic` fuera de `#[cfg(test)]`.
-- No dependencias nuevas sin ADR y `cargo deny`.
-- No cambiar `keydex.schema/v1` sin bump, fixture compartido y test cruzado.
-- No `eval`, no red, no lectura de ficheros arbitrarios desde un resolver.
-
-## Mapa
-crates/keydex-core → motor puro (sin Python)
-crates/keydex-py   → PyO3, solo adaptadores
-python/keydex      → API, tipos, integraciones
-docs/              → spec y ADRs
-
-## Comandos
-just check   # fmt + clippy -D warnings + ruff + mypy --strict
-just test    # cargo test + pytest (3.11-3.14 y 3.14t)
-just gate    # invariantes de arquitectura (reglas 1 y 2)
-just bench   # codspeed; falla si hay regresión
-just fuzz    # 60s por parser
-
-## Terminado cuando
-- [ ] hay un test que falla sin el cambio
-- [ ] `just check`, `just gate` y `just test` verdes
-- [ ] `just bench` sin regresión
-- [ ] `docs/spec.md` actualizado si cambió el comportamiento
-- [ ] entrada en `CHANGELOG.md`
-```
-
-Además, `crates/keydex-core/AGENTS.md` (se carga al entrar en ese subárbol):
-
-```markdown
-Este crate se publica en crates.io: API pública mínima, `#[non_exhaustive]` en enums
-públicos, semver 0.x, docs.rs con `all-features`. Cero pyo3 y cero lectura directa
-de entorno/reloj/FS: todo entra inyectado. Los errores son enums, nunca strings.
-```
-
-### 24.2 Mecánica de OpenCode (verificada)
-
-- Solo se reconoce `AGENTS.md`; `CLAUDE.md` no se usa como fallback.
-- Se cargan el global `~/.config/opencode/AGENTS.md` y todos los `AGENTS.md` desde el
-  **directorio de trabajo** hacia arriba. Los anidados por debajo se cargan de forma
-  perezosa al leer ficheros de esa zona.
-- Se **combinan**, no se sustituyen, y OpenCode no resuelve conflictos: no dupliques
-  una regla en dos niveles con matices distintos.
-- Editar un `AGENTS.md` anidado ya cargado no se detecta hasta abrir sesión nueva.
-- `instructions` en `opencode.jsonc` añade ficheros, globs o URLs tras los `AGENTS.md`
-  (útil para `docs/adr/*.md`), no para las reglas duras.
-- **Operativa:** abrir la sesión con el directorio de trabajo en `~/git/keydex`, no en
-  `~/git`. Si arranca un nivel por encima, el `AGENTS.md` del repo no entra hasta que
-  el agente explore dentro del repo.
-
-### 24.3 Regla → mecanismo de cumplimiento
-
-| Regla | Mecanismo verificable |
+| Rule | Verifiable mechanism |
 |---|---|
-| core sin pyo3 | `just gate`: `cargo tree -p keydex-core` no contiene `pyo3` |
-| core sin entorno/reloj/FS | `clippy.toml` con `disallowed-methods` (`std::env::*`, `SystemTime::now`, `std::fs::*`) + `deny(clippy::disallowed_methods)` |
-| errores estructurados | `deny(panic, unwrap_used, expect_used)` en core |
-| sin estado global | `forbid(static_mut_refs)` + review; caches con `RwLock`/`OnceLock` |
-| cero FFI por acceso | bench gate: acceso ±10% vs dataclass nativa |
-| spans en `explain` | test dorado con `line != null` |
-| dependencias prohibidas | `cargo deny` con `bans` para `serde_yaml` |
-| determinismo | test que baraja `os.environ` y compara `dump()` byte a byte |
-| no fuga de secretos | suite dedicada por superficie (`repr`, `dump`, `explain`, errores) |
+| core without pyo3 | `./scripts/gate.sh`: `cargo tree -p keydex-core` contains no `pyo3` |
+| core without env/clock/FS | `clippy.toml` with `disallowed-methods` (`std::env::*`, `SystemTime::now`, `std::fs::*`) + `deny(clippy::disallowed_methods)` |
+| structured errors | `deny(panic, unwrap_used, expect_used)` in the core |
+| no global state | `forbid(static_mut_refs)` + review; caches behind `RwLock`/`OnceLock` |
+| zero FFI per access | benchmark gate: access ±10% vs a native dataclass |
+| spans in `explain` | golden test with `line != null` |
+| banned dependencies | `cargo deny` with `bans` for `serde_yaml` |
+| determinism | test that shuffles `os.environ` and compares `dump()` byte for byte |
+| no secret leaks | dedicated suite per output surface (`repr`, `dump`, `explain`, errors) |
+| no push to `main` | branch protection: PR required, five checks required, force-push blocked |
 
-### 24.4 Calidad del propio `AGENTS.md`
+### 24.2 Rules for `AGENTS.md` itself
 
-- ≤100 líneas. Si crece, el agente lo hojea en vez de leerlo.
-- Todo en imperativo y comprobable: nada de "preferiblemente" ni "considera".
-- Sin duplicar la spec: solo reglas y punteros a `docs/`.
-- Cada regla con su comando de verificación al lado.
-- Revisarlo cuando una fase cambia: una regla caducada es peor que ninguna.
+- ≤100 lines. If it grows, the agent skims it instead of reading it.
+- Everything imperative and checkable: no "preferably" or "consider".
+- No duplication of the spec: only rules and pointers to `docs/`.
+- Every rule with its verification command next to it.
+- Review it when a phase changes: an outdated rule is worse than none.
 
 ---
 
-## 25. Anexo: reserva de nombres
+## 25. Annex: name reservation
 
-| Nombre | PyPI | crates.io |
+| Name | PyPI | crates.io |
 |---|---|---|
-| `keydex` | reservado: 0.0.1 publicada | no se usa |
-| `keydex-core` | n/a | reservado: 0.0.1 publicada |
-| `keydex-py` | n/a | no se publica (`publish = false`) |
+| `keydex` | reserved: 0.0.1 published | not used |
+| `keydex-core` | n/a | reserved: 0.0.1 published |
+| `keydex-py` | n/a | not published (`publish = false`) |
 
-Reservado el 2026-10-27: `keydex` 0.0.1 en PyPI y `keydex-core` 0.0.1 en crates.io.
+Reserved on 2026-10-27: `keydex` 0.0.1 on PyPI and `keydex-core` 0.0.1 on crates.io.
 
 ---
 
-## 26. Repositorio y publicación
+## 26. Repository and release
 
-### 26.1 Un solo repo
+### 26.1 A single repository
 
-**`keydex`** (monorepo). Publicar en crates.io y PyPI no requiere repos separados:
-son paquetes distintos construidos desde el mismo tag.
+**`keydex`** (monorepo). Publishing to crates.io and PyPI does not require separate repos:
+they are different packages built from the same tag.
 
-La razón técnica no es la comodidad, es que los **tests cruzados** solo tienen sentido
-si viven juntos:
+The reason is not convenience, it is that **cross tests** only make sense if they live
+together:
 
-- fixtures compartidos del `keydex.schema/v1` consumidos por Rust y por Python;
-- gate de arquitectura (`cargo tree` de `keydex-core`) y gate de rendimiento
-  (benchmark Rust vs decode Python) en el mismo pipeline;
-- un cambio de IR rompe ambas mitades a la vez, y el CI lo ve en un solo run.
+- shared `keydex.schema/v1` fixtures consumed by Rust and Python;
+- the architecture gate (`cargo tree` of `keydex-core`) and the performance gate in the same
+  pipeline;
+- an IR change breaks both halves at once, and CI sees it in one run.
 
-Con repos separados eso se convierte en submódulos, duplicación de fixtures o releases
-desincronizadas.
+With separate repos that becomes submodules, duplicated fixtures or desynchronised releases.
 
-### 26.2 Layout del repo
+### 26.2 Repository layout
 
 ```
 keydex/
-├── .github/
-│   ├── workflows/{ci.yml,release.yml}
-│   └── ISSUE_TEMPLATE/
+├── .github/workflows/{ci.yml,release.yml}
 ├── crates/
-│   ├── keydex-core/          # publish = true en crates.io
-│   │   ├── benches/          # criterion
-│   │   └── AGENTS.md
-│   └── keydex-py/            # publish = false (se distribuye por PyPI)
+│   ├── keydex-core/          # publish = true on crates.io
+│   └── keydex-py/            # publish = false (distributed through PyPI)
 ├── python/
-│   ├── keydex/               # API pública, tipos, integraciones
+│   ├── keydex/               # public API, types, integrations
 │   ├── tests/
-│   └── bench/                # pytest-codspeed
+│   └── bench/
 ├── docs/
-│   ├── spec.md               # esta especificación
-│   └── adr/                  # 0001-*.md …
-├── examples/                 # uso mínimo, config por fichero y por env
+│   ├── spec.md               # this specification
+│   ├── benchmarks.md
+│   ├── release.md
+│   ├── adr/                  # 0001-*.md …
+│   └── spikes/               # measured evidence
+├── examples/homelab-demo/    # runnable example
 ├── AGENTS.md
 ├── CHANGELOG.md
 ├── SECURITY.md
 ├── LICENSE-MIT / LICENSE-APACHE
 ├── README.md
 ├── Cargo.toml                # workspace
-├── Cargo.lock                # se commitea: distribuimos binarios/wheels
-├── pyproject.toml            # maturin: python-source = "python",
-│                             #          manifest-path = "crates/keydex-py/Cargo.toml"
+├── Cargo.lock                # committed: we ship binaries and wheels
+├── pyproject.toml            # maturin
 ├── rust-toolchain.toml
-├── clippy.toml               # disallowed-methods (regla 2)
+├── clippy.toml               # disallowed-methods (hard rule 2)
 ├── deny.toml                 # bans: serde_yaml
-├── rustfmt.toml
 ├── justfile
 └── .gitignore / .gitattributes
 ```
 
-### 26.3 Cuándo dividir en más repos
+### 26.3 When to split into more repositories
 
-| Repo futuro | Cuándo crearlo |
+| Future repo | When to create it |
 |---|---|
-| `keydex-hydra` (composición por grupos) | solo si el plugin crece y tiene cadencia propia |
-| `keydex-sources-<backend>` | solo si un tercero mantiene el backend |
-| `keydex-examples` | nunca por ahora: `examples/` basta |
+| `keydex-hydra` (group composition) | only if the plugin grows and gets its own cadence |
+| `keydex-sources-<backend>` | only if a third party maintains the backend |
+| `keydex-examples` | never for now: `examples/` is enough |
 
-Regla: **no dividir hasta que exista una cadencia de release distinta o un mantenedor
-distinto**. Un repo por concepto es deuda de CI y de versionado.
+Rule: **do not split until there is a different release cadence or a different
+maintainer**. One repo per concept is CI and versioning debt.
 
-### 26.4 Tres versiones distintas (no confundirlas)
+### 26.4 Three different versions (do not confuse them)
 
-| Versión | Dónde vive | Cuándo cambia |
+| Version | Where it lives | When it changes |
 |---|---|---|
-| Paquete (`0.x.y`) | `Cargo.toml` workspace + `pyproject.toml` | cada release |
-| `keydex.schema/v1` | campo `ir` del JSON | solo con ruptura del contrato |
-| Artefacto (wheel/`cp314t`) | tags de build | cambios de ABI |
+| Package (`0.x.y`) | workspace `Cargo.toml` + `pyproject.toml` | every release |
+| `keydex.schema/v1` | `ir` field of the JSON | only when the contract breaks |
+| Artifact (wheel/`cp314t`) | build tags | ABI changes |
 
-El IR sobrevive a varias versiones del paquete. Es lo que permite que un `dump` viejo
-siga siendo legible.
+The IR survives several package versions. That is what keeps an old `dump` readable.
 
-### 26.5 Ficheros que no se pueden saltar
+### 26.5 Files that cannot be skipped
 
-- **`SECURITY.md`**: la librería maneja secretos. Política de divulgación desde el
-  primer commit, no después del primer incidente.
-- **Licencia dual MIT OR Apache-2.0**: convención del ecosistema Rust y compatible con
-  uso corporativo.
-- **`CHANGELOG.md`** generado por `release-plz` a partir de conventional commits.
-- **`docs/adr/`**: las cinco decisiones irreversibles ya tomadas (nombre, sin
-  expresiones, `abi3` + `cp314t`, IR versionado, spans obligatorios).
+- **`SECURITY.md`**: the library handles secrets. Disclosure policy from the first commit,
+  not after the first incident.
+- **Dual license MIT OR Apache-2.0**: Rust ecosystem convention and corporate friendly.
+- **`CHANGELOG.md`**: Keep a Changelog format.
+- **`docs/adr/`**: the irreversible decisions already taken (name, no expressions,
+  `abi3` + `cp314t`, versioned IR, mandatory spans, parser selection, serde transport).
 
-### 26.6 Flujo de release
+### 26.6 Release flow
 
-1. Conventional commits en `main` (trunk-based, rama protegida).
-2. `release-plz` abre PR de release: bump + CHANGELOG.
+1. Conventional commits on a feature branch; `main` is protected.
+2. Pull request with the five checks green.
 3. Merge → tag `vX.Y.Z`.
-4. CI publica `keydex-core` en crates.io **primero** y después los wheels en PyPI
-   (el orden importa: `keydex-py` depende del core por versión).
+4. CI publishes `keydex-core` to crates.io **first** and then the wheels to PyPI (order
+   matters: `keydex-py` depends on the core by version).
 
-> La reserva de nombres (`keydex` en PyPI y crates.io) es una publicación real y la
-> ejecuta el usuario, no el agente.
+> Name reservation and publication are real actions and are performed by the user, not by
+> the agent.

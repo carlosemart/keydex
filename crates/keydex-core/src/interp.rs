@@ -1,22 +1,22 @@
-//! Interpolación de referencias `${...}`.
+//! `${...}` reference interpolation.
 //!
-//! Semántica (especificación §8): solo referencias y resolvers puros, sin expresiones,
-//! sin `eval`. Soporta `${clave}`, `${clave:-default}`, `${env:VAR}` y anidamiento en los
-//! valores por defecto. La resolución es memoizada y detecta ciclos con traza completa.
+//! Semantics (specification §8): references and pure resolvers only, no expressions, no
+//! `eval`. Supports `${key}`, `${key:-default}`, `${env:VAR}` and nesting inside default
+//! values. Resolution is memoised and cycles are detected with a full trace.
 
 use std::collections::BTreeMap;
 
 use crate::error::{Error, Result};
 use crate::value::Value;
 
-/// Origen de una referencia.
+/// Origin of a reference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Target<'a> {
     Key(&'a str),
     Env(&'a str),
 }
 
-/// Placeholder localizado dentro de una cadena.
+/// Placeholder located inside a string.
 #[derive(Debug, Clone)]
 struct Placeholder<'a> {
     start: usize,
@@ -25,13 +25,13 @@ struct Placeholder<'a> {
     default: Option<&'a str>,
 }
 
-/// Valores resueltos y, por clave, las referencias directas usadas.
+/// Resolved values and, per key, the direct references used.
 pub(crate) type ResolvedMaps = (BTreeMap<String, Value>, BTreeMap<String, Vec<String>>);
 
-/// Resuelve todas las referencias del mapa de valores crudos.
+/// Resolves every reference in the map of raw values.
 ///
-/// Devuelve los valores ya resueltos y, por clave, las referencias directas usadas
-/// (para `explain`).
+/// Returns the resolved values and, per key, the direct references it used (for
+/// `explain`).
 pub(crate) fn resolve_all(
     raw: &BTreeMap<String, Value>,
     env: &BTreeMap<String, String>,
@@ -103,7 +103,7 @@ impl Resolver<'_> {
             snippet,
         })?;
 
-        // Una cadena que es exactamente un placeholder hereda el tipo del destino.
+        // A string that is exactly one placeholder inherits the type of its target.
         if placeholders.len() == 1 {
             if let Some(only) = placeholders.first() {
                 if only.start == 0 && only.end == text.len() {

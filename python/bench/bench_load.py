@@ -1,11 +1,11 @@
-"""Benchmark de carga: keydex frente a OmegaConf.
+"""Load benchmark: keydex versus OmegaConf.
 
-Uso:
-    python/bench/bench_load.py [n_claves]
+Usage:
+    python/bench/bench_load.py [n_keys]
 
-No es un microbenchmark justo por diseño: keydex hace más trabajo (env, interpolación y
-procedencia por valor). El objetivo es demostrar que ese trabajo extra sigue siendo más
-barato que construir un árbol de objetos Python.
+It is not a fair microbenchmark by design: keydex does more work (environment,
+interpolation and per-value provenance). The goal is to show that the extra work is still
+cheaper than building a tree of Python objects.
 """
 
 from __future__ import annotations
@@ -47,20 +47,20 @@ def bench(label: str, fn: Callable[[], object], iters: int = ITERS) -> float:
 def main() -> None:
     path = make_doc(N)
     size = path.stat().st_size
-    print(f"\n{N + 4} claves · {size / 1024:.1f} KiB · mediana de {ITERS} ejecuciones\n")
+    print(f"\n{N + 4} keys · {size / 1024:.1f} KiB · median of {ITERS} runs\n")
 
     t_keydex = bench(
         "keydex.load",
-        lambda: keydex.load([str(path)], env_prefix="BENCH_", env={}),
+        lambda: keydex.load_settings([str(path)], env_prefix="BENCH_", env={}),
     )
     t_omega = bench("OmegaConf.load", lambda: OmegaConf.load(path))
 
-    cfg = keydex.load([str(path)], env_prefix="BENCH_", env={})
+    cfg = keydex.load_settings([str(path)], env_prefix="BENCH_", env={})
     oc = OmegaConf.load(path)
-    bench("keydex explícito (explain)", lambda: cfg.explain("k0500"))
-    bench("OmegaConf acceso", lambda: oc.k0500)
+    bench("keydex explicit (explain)", lambda: cfg.explain("k0500"))
+    bench("OmegaConf access", lambda: oc.k0500)
 
-    print(f"\nratio de carga: {t_omega / t_keydex:.1f}x más rápido que OmegaConf")
+    print(f"\nload ratio: {t_omega / t_keydex:.1f}x faster than OmegaConf")
 
 
 if __name__ == "__main__":

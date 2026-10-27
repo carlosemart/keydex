@@ -1,36 +1,36 @@
-# Demo: servicio de homelab
+# Demo: homelab service
 
-Ejercita el caso de uso real de keydex en 60 líneas de modelo:
+Exercises keydex's real use case in 60 lines of model:
 
-- **Precedencia** entre fichero base, overlay de perfil y entorno.
-- **Perfiles** que corresponden a entornos (`dev`, `prod`).
-- **Interpolación** que se resuelve *después* del merge: `dsn` se define una sola vez y
-  en `prod` apunta a `db.internal` sin repetir la línea.
-- **Secretos** que no se filtran en `repr`, `str` ni en la salida del programa, y que
-  pueden venir de un fichero (`*_FILE`).
-- **Validación** que rompe el arranque con la ruta exacta del problema.
+- **Precedence** between the base file, the profile overlay and the environment.
+- **Profiles** that map to environments (`dev`, `prod`).
+- **Interpolation** resolved *after* the merge: `dsn` is defined once and in `prod` points
+  at `db.internal` without repeating the line.
+- **Secrets** that do not leak in `repr`, `str` or the program output, and that can come
+  from a file (`*_FILE`).
+- **Validation** that stops startup with the exact path of the problem.
 
-## Ejecutar
+## Run
 
 ```bash
-uv venv && uv pip install -e .          # desde la raíz del repo
+uv venv && uv pip install -e .          # from the repository root
 
 python examples/homelab-demo/src/main.py --profiles dev
 python examples/homelab-demo/src/main.py --profiles prod
 ```
 
-Salida en `prod`:
+Output in `prod`:
 
 ```
 homelab (prod)
   db        postgres://keydex@db.internal:5432/homelab  pool=20
-  api       https://api.homelab.local  timeout=10s  reintentos=2
-  backup    /srv/backups  retención=30d
+  api       https://api.homelab.local  timeout=10s  retries=2
+  backup    /srv/backups  retention=30d
   features  metrics=True tracing=True
-  secreto   Secret('***') (9 bytes cargados)
+  secret    Secret('***') (9 bytes loaded)
 ```
 
-## Procedencia
+## Provenance
 
 ```bash
 python examples/homelab-demo/src/main.py --profiles prod --explain db.host
@@ -48,25 +48,25 @@ python examples/homelab-demo/src/main.py --profiles prod --explain db.host
 }
 ```
 
-## Overrides y secretos
+## Overrides and secrets
 
 ```bash
 APP_DB__HOST=override.local python examples/homelab-demo/src/main.py --profiles prod
 APP_DB__PASSWORD_FILE=/run/secrets/db python examples/homelab-demo/src/main.py --profiles prod
 ```
 
-Si el fichero de secreto no existe, el arranque falla con un error explícito en vez de
-arrancar con una contraseña vacía.
+If the secret file does not exist, startup fails with an explicit error instead of
+starting with an empty password.
 
-## Configuración inválida
+## Invalid configuration
 
 ```bash
-APP_DB__PORT=no-es-un-numero python examples/homelab-demo/src/main.py --profiles dev
+APP_DB__PORT=not-a-number python examples/homelab-demo/src/main.py --profiles dev
 ```
 
 ```
-configuración inválida:
-  db.port: se esperaba un entero, llegó "no-es-un-numero"
+invalid configuration:
+  db.port: expected an integer, got "not-a-number"
 ```
 
 ## Tests

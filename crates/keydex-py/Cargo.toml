@@ -1,6 +1,6 @@
 [package]
 name = "keydex-py"
-description = "Binding de Python (PyO3) para keydex. No se publica en crates.io."
+description = "Python (PyO3) binding for keydex. Not published on crates.io."
 publish = false
 version.workspace = true
 edition.workspace = true
@@ -15,8 +15,8 @@ name = "_keydex"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-# Un wheel sirve para 3.11–3.15 con GIL. Para un build free-threaded, `abi3` no aplica:
-# se compila con `--no-default-features`.
+# One wheel covers 3.11–3.15 with the GIL. For a free-threaded build `abi3` does not
+# apply: compile with `--no-default-features`.
 default = ["abi3"]
 abi3 = ["pyo3/abi3-py311"]
 

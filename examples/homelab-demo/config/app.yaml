@@ -8,8 +8,8 @@ db:
   user: keydex
   password: change-me
   pool_size: 5
-  # Se define una sola vez: la interpolación se resuelve DESPUÉS del merge, así que
-  # en prod apuntará a db.internal sin repetir la línea.
+  # Defined once: interpolation runs AFTER the merge, so in prod it points at
+  # db.internal without repeating the line.
   dsn: "postgres://${db.user}@${db.host}:${db.port}/${db.name}"
 
 api:

@@ -1,6 +1,6 @@
-//! JSON con spans, vía `jsonc-parser`.
+//! JSON with spans, through `jsonc-parser`.
 //!
-//! `jiter` se descartó en el spike 0001: es más rápido pero no expone posiciones.
+//! `jiter` was discarded in spike 0001: it is faster but exposes no positions.
 
 use jsonc_parser::ast::Value as JsonValue;
 use jsonc_parser::common::Ranged;
@@ -70,8 +70,8 @@ fn json_value(value: &JsonValue) -> Value {
         JsonValue::BooleanLit(b) => Value::Bool(b.value),
         JsonValue::NullKeyword(_) => Value::Null,
         JsonValue::NumberLit(n) => {
-            // `jsonc-parser` conserva el literal original como texto: no convertimos
-            // `5432` en `5432.0`.
+            // `jsonc-parser` keeps the original literal as text: `5432` does not become
+            // `5432.0`.
             match n.value.parse::<i64>() {
                 Ok(i) => Value::Int(i),
                 Err(_) => match n.value.parse::<f64>() {

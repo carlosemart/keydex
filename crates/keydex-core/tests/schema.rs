@@ -1,4 +1,4 @@
-//! Tests del Schema IR: binding relajado, coerción y errores agregados.
+//! Schema IR tests: relaxed binding, coercion and aggregated errors.
 
 use std::collections::BTreeMap;
 
@@ -50,7 +50,7 @@ fn load(ir: &str, yaml: &str, env_pairs: &[(&str, &str)]) -> serde_json::Value {
 }
 
 #[test]
-fn el_binding_relajado_no_necesita_doble_guion_bajo() {
+fn relaxed_binding_does_not_need_double_underscore() {
     let tree = load(IR, YAML, &[("APP_DB_HOST", "env.internal")]);
     assert_eq!(tree["db"]["host"], json!("env.internal"));
     assert_eq!(tree["db"]["port"], json!(5432));
@@ -58,32 +58,32 @@ fn el_binding_relajado_no_necesita_doble_guion_bajo() {
 }
 
 #[test]
-fn el_doble_guion_bajo_tambien_funciona() {
-    let tree = load(IR, YAML, &[("APP_DB__HOST", "via.doble")]);
-    assert_eq!(tree["db"]["host"], json!("via.doble"));
+fn double_underscore_also_works() {
+    let tree = load(IR, YAML, &[("APP_DB__HOST", "via.double")]);
+    assert_eq!(tree["db"]["host"], json!("via.double"));
 }
 
 #[test]
-fn coacciona_booleanos_relajados() {
+fn coerces_relaxed_booleans() {
     let tree = load(IR, YAML, &[("APP_DEBUG", "yes")]);
     assert_eq!(tree["debug"], json!(true));
 }
 
 #[test]
-fn los_campos_opcionales_ausentes_valen_null() {
+fn missing_optional_fields_are_null() {
     let tree = load(IR, YAML, &[]);
     assert_eq!(tree["note"], json!(null));
 }
 
 #[test]
-fn los_requeridos_ausentes_son_error_con_ruta() {
+fn missing_required_fields_are_an_error_with_a_path() {
     let schema = Schema::from_json(IR).unwrap();
     let mut builder = Builder::new().with_env(env(&[]));
     builder
         .schema_env_source(&schema, "APP_", Tier::Environment)
         .unwrap();
     builder
-        .document("vacio.yaml", "debug: true\n", Format::Yaml, Tier::BaseFile)
+        .document("empty.yaml", "debug: true\n", Format::Yaml, Tier::BaseFile)
         .unwrap();
     let snapshot = builder.build().unwrap();
 
@@ -91,15 +91,15 @@ fn los_requeridos_ausentes_son_error_con_ruta() {
     assert!(
         errors
             .iter()
-            .any(|e| e.path == "db.host" && e.message.contains("requerido")),
-        "errores: {errors:?}"
+            .any(|e| e.path == "db.host" && e.message.contains("required")),
+        "errors: {errors:?}"
     );
 }
 
 #[test]
-fn un_tipo_incorrecto_es_error_con_ruta_y_valor() {
+fn a_wrong_type_is_an_error_with_path_and_value() {
     let schema = Schema::from_json(IR).unwrap();
-    let mut builder = Builder::new().with_env(env(&[("APP_DB__PORT", "muchos")]));
+    let mut builder = Builder::new().with_env(env(&[("APP_DB__PORT", "many")]));
     builder
         .schema_env_source(&schema, "APP_", Tier::Environment)
         .unwrap();
@@ -112,22 +112,22 @@ fn un_tipo_incorrecto_es_error_con_ruta_y_valor() {
     assert!(
         errors
             .iter()
-            .any(|e| e.path == "db.port" && e.message.contains("entero")),
-        "errores: {errors:?}"
+            .any(|e| e.path == "db.port" && e.message.contains("integer")),
+        "errors: {errors:?}"
     );
 }
 
 #[test]
-fn los_errores_se_agregan() {
+fn errors_are_aggregated() {
     let schema = Schema::from_json(IR).unwrap();
     let mut builder =
-        Builder::new().with_env(env(&[("APP_DB__PORT", "muchos"), ("APP_DEBUG", "quizas")]));
+        Builder::new().with_env(env(&[("APP_DB__PORT", "many"), ("APP_DEBUG", "maybe")]));
     builder
         .schema_env_source(&schema, "APP_", Tier::Environment)
         .unwrap();
     builder
         .document(
-            "vacio.yaml",
+            "empty.yaml",
             "db:\n  host: h\n",
             Format::Yaml,
             Tier::BaseFile,
@@ -136,13 +136,13 @@ fn los_errores_se_agregan() {
     let snapshot = builder.build().unwrap();
 
     let errors = coerce(&snapshot, &schema).unwrap_err();
-    assert_eq!(errors.len(), 2, "errores: {errors:?}");
+    assert_eq!(errors.len(), 2, "errors: {errors:?}");
 }
 
 #[test]
-fn un_binding_ambiguo_es_error() {
-    // `a.b.c` y `a.b_c` colisionan en la forma relajada (`a_b_c`) y ninguna casa de
-    // forma exacta con `APP_A_B_C`.
+fn an_ambiguous_binding_is_an_error() {
+    // `a.b.c` and `a.b_c` collide in the relaxed form (`a_b_c`) and neither matches
+    // `APP_A_B_C` exactly.
     let ir = r#"{
       "ir": "keydex.schema/v1",
       "root": {"type":"struct","required":true,"fields":{
@@ -163,8 +163,8 @@ fn un_binding_ambiguo_es_error() {
 }
 
 #[test]
-fn la_coincidencia_exacta_gana_a_la_relajada() {
-    // `APP_A_B` casa exactamente con el campo `a_b`, aunque `a.b` también exista.
+fn exact_match_beats_relaxed() {
+    // `APP_A_B` matches the field `a_b` exactly, even though `a.b` also exists.
     let ir = r#"{
       "ir": "keydex.schema/v1",
       "root": {"type":"struct","required":true,"fields":{
@@ -185,12 +185,12 @@ fn la_coincidencia_exacta_gana_a_la_relajada() {
     let snapshot = builder.build().unwrap();
     let tree = coerce(&snapshot, &schema).unwrap();
     assert_eq!(tree["a_b"], json!("literal"));
-    // `a` no es requerido y quedó vacío: se omite para que Python aplique su default.
-    assert!(tree.get("a").is_none(), "árbol: {tree}");
+    // `a` is not required and ended up empty: it is omitted so Python applies its default.
+    assert!(tree.get("a").is_none(), "tree: {tree}");
 }
 
 #[test]
-fn rechaza_un_ir_de_otra_version() {
+fn rejects_an_ir_from_another_version() {
     let error =
         Schema::from_json(r#"{"ir":"keydex.schema/v2","root":{"type":"str"}}"#).unwrap_err();
     assert!(matches!(
@@ -200,7 +200,7 @@ fn rechaza_un_ir_de_otra_version() {
 }
 
 #[test]
-fn detecta_claves_desconocidas_con_sugerencia() {
+fn detects_unknown_keys_with_a_suggestion() {
     let schema = Schema::from_json(IR).unwrap();
     let mut builder = Builder::new().with_env(env(&[]));
     builder
@@ -223,7 +223,7 @@ fn detecta_claves_desconocidas_con_sugerencia() {
 }
 
 #[test]
-fn sugiere_la_ruta_cuando_el_nivel_esta_mal_anidado() {
+fn suggests_the_path_when_the_level_is_nested_wrong() {
     let ir = r#"{
       "ir": "keydex.schema/v1",
       "root": {"type":"struct","required":true,"fields":{
@@ -250,7 +250,7 @@ fn sugiere_la_ruta_cuando_el_nivel_esta_mal_anidado() {
 }
 
 #[test]
-fn las_claves_anidadas_dentro_de_listas_son_conocidas() {
+fn nested_keys_inside_lists_are_known() {
     let ir = r#"{
       "ir": "keydex.schema/v1",
       "root": {"type":"struct","required":true,"fields":{

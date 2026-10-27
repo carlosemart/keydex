@@ -1,7 +1,7 @@
-//! Construcción de snapshots.
+//! Snapshot building.
 //!
-//! El `Builder` no lee ficheros ni entorno: recibe el contenido y el mapa de variables
-//! ya capturados. La lectura es responsabilidad de la capa que lo llama.
+//! The `Builder` does not read files or the environment: it receives the contents and the
+//! captured variables. Reading is the responsibility of the calling layer.
 
 use std::collections::BTreeMap;
 
@@ -13,7 +13,7 @@ use crate::snapshot::{Resolved, Snapshot};
 use crate::source::{RawEntry, RawSource, SourceId, Tier};
 use crate::value::{Provenance, Value};
 
-/// Constructor de snapshots.
+/// Snapshot builder.
 #[derive(Debug, Default)]
 pub struct Builder {
     sources: Vec<RawSource>,
@@ -22,22 +22,23 @@ pub struct Builder {
 }
 
 impl Builder {
-    /// Constructor vacío.
+    /// Empty builder.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Fija las variables de entorno ya capturadas.
+    /// Sets the already captured environment variables.
     ///
-    /// El core no lee `std::env`: el llamante decide qué entorno ve la configuración.
+    /// The core does not read `std::env`: the caller decides which environment the
+    /// configuration sees.
     #[must_use]
     pub fn with_env(mut self, env: BTreeMap<String, String>) -> Self {
         self.env = env;
         self
     }
 
-    /// Añade una fuente de variables de entorno.
+    /// Adds an environment variable source.
     pub fn env_source(&mut self, prefix: &str, tier: Tier) -> &mut Self {
         let entries = env::parse(&self.env, prefix);
         let order = self.take_order();
@@ -52,10 +53,10 @@ impl Builder {
         self
     }
 
-    /// Añade una fuente de entorno con **binding relajado contra el esquema**.
+    /// Adds an environment source with **relaxed binding against the schema**.
     ///
-    /// A diferencia de [`Builder::env_source`], aquí `APP_DB_HOST` casa con `db.host`
-    /// sin necesidad de `__`: el esquema desambigua.
+    /// Unlike [`Builder::env_source`], here `APP_DB_HOST` matches `db.host` without
+    /// needing `__`: the schema disambiguates.
     #[cfg(feature = "schema")]
     pub fn schema_env_source(
         &mut self,
@@ -84,7 +85,7 @@ impl Builder {
         Ok(self)
     }
 
-    /// Añade un documento ya leído en memoria.
+    /// Adds a document already read into memory.
     pub fn document(
         &mut self,
         name: &str,
@@ -105,14 +106,14 @@ impl Builder {
         Ok(self)
     }
 
-    /// Aplica precedencia, resuelve interpolaciones y devuelve el snapshot.
+    /// Applies precedence, resolves interpolations and returns the snapshot.
     pub fn build(self) -> Result<Snapshot> {
         let Builder {
             mut sources, env, ..
         } = self;
-        // Se aplican de MENOR a MAYOR prioridad: banda descendente (rank alto = menos
-        // prioritario) y, dentro de la banda, orden ascendente. La última en aplicarse
-        // gana.
+        // Sources are applied from LOWEST to HIGHEST priority: band descending (a high
+        // rank means less important) and, inside the band, order ascending. The last one
+        // to be applied wins.
         sources.sort_by(|a, b| {
             b.id.tier
                 .rank()

@@ -1,10 +1,10 @@
-//! Snapshot inmutable con procedencia.
+//! Immutable snapshot with provenance.
 
 use std::collections::BTreeMap;
 
 use crate::value::{Provenance, Value};
 
-/// Valor resuelto con su procedencia completa.
+/// Resolved value with its full provenance.
 #[derive(Debug, Clone)]
 pub(crate) struct Resolved {
     pub(crate) value: Value,
@@ -13,25 +13,25 @@ pub(crate) struct Resolved {
     pub(crate) refs: Vec<String>,
 }
 
-/// Explicación de una clave: el valor y por qué es ese.
+/// Explanation of a key: the value and why it is that value.
 #[derive(Debug, Clone)]
 pub struct Explanation {
-    /// Clave consultada.
+    /// Queried key.
     pub key: String,
-    /// Valor final.
+    /// Final value.
     pub value: Value,
-    /// Fuente ganadora.
+    /// Winning source.
     pub winner: Provenance,
-    /// Fuentes que definieron la clave y perdieron, de la más antigua a la más reciente.
+    /// Sources that defined the key and lost, oldest first.
     pub shadowed: Vec<Provenance>,
-    /// Claves referenciadas por interpolación.
+    /// Keys referenced through interpolation.
     pub refs: Vec<String>,
 }
 
-/// Configuración resuelta e inmutable.
+/// Resolved and immutable configuration.
 ///
-/// Es el único estado que comparten los hilos: no hay mutación ni bloqueos. Si en el
-/// futuro hay `refresh()`, se construye otro snapshot y se intercambia el puntero.
+/// It is the only state shared between threads: no mutation, no locks. A future
+/// `refresh()` builds another snapshot and swaps the pointer.
 #[derive(Debug, Clone, Default)]
 pub struct Snapshot {
     entries: BTreeMap<String, Resolved>,
@@ -42,40 +42,39 @@ impl Snapshot {
         Self { entries }
     }
 
-    /// Valor de una clave, si existe.
+    /// Value of a key, when it exists.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&Value> {
         self.entries.get(key).map(|entry| &entry.value)
     }
 
-    /// Número de claves.
+    /// Number of keys.
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// `true` si no hay claves.
+    /// `true` when there are no keys.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    /// Claves en orden lexicográfico.
+    /// Keys in lexicographic order.
     pub fn keys(&self) -> impl Iterator<Item = &str> {
         self.entries.keys().map(String::as_str)
     }
 
-    /// Claves y valores en orden lexicográfico.
+    /// Keys and values in lexicographic order.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &Value)> {
         self.entries
             .iter()
             .map(|(key, entry)| (key.as_str(), &entry.value))
     }
 
-    /// Claves que empiezan por un prefijo, en orden lexicográfico.
+    /// Keys starting with a prefix, in lexicographic order.
     ///
-    /// Se usa para reconstruir listas a partir de las claves aplanadas (`servers[0]`,
-    /// `servers[1]`, …).
+    /// Used to rebuild lists from the flattened keys (`servers[0]`, `servers[1]`, ...).
     pub fn keys_with_prefix<'a>(&'a self, prefix: &str) -> impl Iterator<Item = &'a str> + 'a {
         let start = prefix.to_string();
         self.entries
@@ -84,7 +83,7 @@ impl Snapshot {
             .map(|(key, _)| key.as_str())
     }
 
-    /// Procedencia de una clave: quién ganó, quién fue sombreado y qué referencias usó.
+    /// Provenance of a key: who won, who was shadowed and which references it used.
     #[must_use]
     pub fn explain(&self, key: &str) -> Option<Explanation> {
         self.entries.get(key).map(|entry| Explanation {

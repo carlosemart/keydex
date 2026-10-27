@@ -1,7 +1,7 @@
-"""keydex — acceso tipado y explicable a configuración.
+"""keydex — typed, explainable configuration access.
 
-El motor vive en Rust; esta capa expone la API pública, construye el Schema IR a partir
-de los dataclasses y materializa el resultado.
+The engine lives in Rust; this layer exposes the public API, builds the Schema IR from
+dataclasses and materialises the result.
 """
 
 from __future__ import annotations
@@ -36,23 +36,23 @@ T = TypeVar("T")
 
 
 class UnknownKeyWarning(UserWarning):
-    """Una clave de la configuración no la usa ninguna ruta del esquema.
+    """A configuration key is not used by any schema path.
 
-    Casi siempre es un error de escritura o un nivel mal anidado: el valor se ignora en
-    silencio y el override no aplica nunca.
+    It is almost always a typo or a wrongly nested level: the value is silently ignored
+    and the override never applies.
     """
 
 
 class ValidationError(KeydexError):
-    """El snapshot no cumple el esquema del modelo.
+    """The snapshot does not satisfy the model schema.
 
-    `errors` es una lista de diccionarios con `path` y `message`, una por problema.
+    `errors` is a list of dictionaries with `path` and `message`, one per problem.
     """
 
     def __init__(self, errors: list[dict[str, str]]) -> None:
         self.errors = errors
         summary = "; ".join(f"{error['path']}: {error['message']}" for error in errors)
-        super().__init__(summary or "validación fallida")
+        super().__init__(summary or "validation failed")
 
 
 def load(
@@ -64,10 +64,10 @@ def load(
     profiles: tuple[str, ...] | list[str] = (),
     on_unknown: str = "warn",
 ) -> T:
-    """Carga la configuración y devuelve una instancia tipada del modelo.
+    """Loads the configuration and returns a typed instance of the model.
 
-    `on_unknown` decide qué hacer con las claves que el esquema no usa: `"warn"`
-    (por defecto, `UnknownKeyWarning`), `"error"` (`ValidationError`) o `"ignore"`.
+    `on_unknown` decides what happens with keys the schema does not use: `"warn"`
+    (default, `UnknownKeyWarning`), `"error"` (`ValidationError`) or `"ignore"`.
     """
     ir = json.dumps(_schema.build_ir(model), separators=(",", ":"))
     errors, unknown, tree = _load_typed(
@@ -95,18 +95,18 @@ def load_settings(
     env: dict[str, str] | None = None,
     profiles: tuple[str, ...] | list[str] = (),
 ) -> Settings:
-    """Carga la configuración en modo diccionario, sin esquema."""
+    """Loads the configuration in dictionary mode, without a schema."""
     return _load_settings(
         list(files), env_prefix, _environment(env, env_prefix), list(profiles)
     )
 
 
 def _environment(env: dict[str, str] | None, prefix: str) -> dict[str, str]:
-    """Materializa el entorno y resuelve la indirección `*_FILE`.
+    """Materialises the environment and resolves the `*_FILE` indirection.
 
-    `APP_DB_PASSWORD_FILE=/run/secrets/db` define `APP_DB_PASSWORD` con el contenido del
-    fichero. La lectura ocurre aquí, no en el motor: el core no toca el sistema de
-    ficheros.
+    `APP_DB_PASSWORD_FILE=/run/secrets/db` defines `APP_DB_PASSWORD` with the file
+    contents. Reading happens here, not in the engine: the core does not touch the
+    filesystem.
     """
     source = dict(os.environ) if env is None else dict(env)
 
@@ -119,7 +119,7 @@ def _environment(env: dict[str, str] | None, prefix: str) -> dict[str, str]:
                 source[key[: -len("_FILE")]] = handle.read().strip()
         except OSError as error:
             raise KeydexError(
-                f"{key}: no se puede leer {reference}: {error}"
+                f"{key}: cannot read {reference}: {error}"
             ) from error
 
     return source

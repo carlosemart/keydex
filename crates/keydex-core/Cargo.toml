@@ -1,6 +1,6 @@
 [package]
 name = "keydex-core"
-description = "Motor de configuración de keydex: fuentes, precedencia, interpolación y procedencia."
+description = "keydex configuration engine: sources, precedence, interpolation and provenance."
 readme = "README.md"
 keywords = ["configuration", "config", "settings", "environment"]
 categories = ["config"]

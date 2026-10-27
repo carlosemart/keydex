@@ -1,4 +1,4 @@
-//! Parsers con spans.
+//! Parsers with spans.
 
 #[cfg(feature = "json")]
 mod json;
@@ -15,20 +15,20 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::source::RawEntry;
 
-/// Formato de documento soportado.
+/// Supported document format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Format {
-    /// YAML 1.2, incluido multi-documento.
+    /// YAML 1.2, multi-document included.
     Yaml,
     /// TOML 1.0.
     Toml,
-    /// JSON, con comentarios y comas finales.
+    /// JSON, with comments and trailing commas.
     Json,
 }
 
 impl Format {
-    /// Deduce el formato a partir de la extensión del fichero.
+    /// Infers the format from the file extension.
     #[must_use]
     pub fn from_path(path: &str) -> Option<Self> {
         let ext = path.rsplit('.').next()?.to_ascii_lowercase();
@@ -40,7 +40,7 @@ impl Format {
         }
     }
 
-    /// Nombre del formato, para mensajes de error.
+    /// Format name, for error messages.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -51,10 +51,10 @@ impl Format {
     }
 }
 
-/// Parsea un documento y devuelve sus entradas planas, con spans.
+/// Parses a document and returns its flat entries, with spans.
 ///
-/// El formato tiene que estar habilitado por feature flag; si no, se devuelve
-/// [`Error::UnsupportedFormat`].
+/// The format must be enabled by feature flag; otherwise
+/// [`Error::UnsupportedFormat`] is returned.
 pub fn parse(src: &str, file: &str, format: Format) -> Result<Vec<RawEntry>> {
     match format {
         Format::Yaml => {
@@ -97,7 +97,7 @@ fn unsupported(format: Format) -> Error {
     }
 }
 
-/// Une un prefijo de ruta con una clave.
+/// Joins a path prefix with a key.
 pub(crate) fn join(prefix: &str, key: &str) -> String {
     if prefix.is_empty() {
         key.to_string()

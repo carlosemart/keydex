@@ -1,4 +1,4 @@
-"""CLI de keydex: `python -m keydex`."""
+"""keydex CLI: `python -m keydex`."""
 
 from __future__ import annotations
 
@@ -11,20 +11,20 @@ import keydex
 
 
 def _common(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--files", nargs="+", default=[], help="ficheros de configuración")
-    parser.add_argument("--env-prefix", default="", help="prefijo de las variables de entorno")
-    parser.add_argument("--profiles", nargs="*", default=[], help="perfiles activos")
+    parser.add_argument("--files", nargs="+", default=[], help="configuration files")
+    parser.add_argument("--env-prefix", default="", help="environment variable prefix")
+    parser.add_argument("--profiles", nargs="*", default=[], help="active profiles")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m keydex")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    explain = sub.add_parser("explain", help="muestra la procedencia de una clave")
+    explain = sub.add_parser("explain", help="shows the provenance of a key")
     explain.add_argument("key")
     _common(explain)
 
-    dump = sub.add_parser("dump", help="vuelca la configuración resuelta en JSON")
+    dump = sub.add_parser("dump", help="dumps the resolved configuration as JSON")
     _common(dump)
 
     args = parser.parse_args(argv)
@@ -42,7 +42,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "explain":
         explanation = settings.explain(args.key)
         if explanation is None:
-            print(f"clave desconocida: {args.key}", file=sys.stderr)
+            print(f"unknown key: {args.key}", file=sys.stderr)
             return 2
         print(json.dumps(explanation, indent=2, ensure_ascii=False))
         return 0

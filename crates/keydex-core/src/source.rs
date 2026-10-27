@@ -1,66 +1,66 @@
-//! Fuentes de configuración y entradas crudas.
+//! Configuration sources and raw entries.
 
 use crate::value::{Span, Value};
 
-/// Banda de precedencia de un origen de configuración.
+/// Precedence band of a configuration origin.
 ///
-/// De mayor a menor prioridad. Dentro de una misma banda decide el orden de aplicación
-/// de la fuente: la última gana.
+/// Highest priority first. Inside a band the application order of the source decides:
+/// the last one wins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 #[non_exhaustive]
 pub enum Tier {
-    /// Overrides de test o programáticos.
+    /// Test or programmatic overrides.
     Override = 0,
-    /// Argumentos de línea de comandos.
+    /// Command line arguments.
     Cli = 1,
-    /// Variables de entorno del sistema.
+    /// System environment variables.
     Environment = 2,
-    /// Ficheros del perfil activo.
+    /// Files of the active profile.
     ProfileFile = 3,
-    /// Ficheros base.
+    /// Base files.
     BaseFile = 4,
-    /// Defaults declarados en el esquema.
+    /// Defaults declared in the schema.
     SchemaDefault = 5,
-    /// Defaults declarados en el código.
+    /// Defaults declared in code.
     CodeDefault = 6,
 }
 
 impl Tier {
-    /// Número de banda. Menor es más prioritario.
+    /// Band number. Lower is more important.
     #[must_use]
     pub const fn rank(self) -> u8 {
         self as u8
     }
 }
 
-/// Identidad de una fuente dentro de un build.
+/// Identity of a source inside a build.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SourceId {
-    /// Nombre lógico: `file:app.yaml`, `env`, `cli`.
+    /// Logical name: `file:app.yaml`, `env`, `cli`.
     pub name: String,
-    /// Banda de precedencia.
+    /// Precedence band.
     pub tier: Tier,
-    /// Orden de aplicación dentro de la banda.
+    /// Application order inside the band.
     pub order: u32,
 }
 
-/// Entrada cruda extraída de una fuente, antes del merge.
+/// Raw entry extracted from a source, before the merge.
 #[derive(Debug, Clone)]
 pub struct RawEntry {
-    /// Ruta normalizada: `db.host`, `servers[0].host`.
+    /// Normalised path: `db.host`, `servers[0].host`.
     pub path: String,
-    /// Valor tal y como aparecía en la fuente.
+    /// Value as it appeared in the source.
     pub value: Value,
-    /// Posición en el documento, si la fuente la conoce.
+    /// Position in the document, when the source knows it.
     pub span: Option<Span>,
 }
 
-/// Todas las entradas de una fuente.
+/// Every entry of a source.
 #[derive(Debug, Clone)]
 pub struct RawSource {
-    /// Identidad de la fuente.
+    /// Source identity.
     pub id: SourceId,
-    /// Entradas en orden de aparición.
+    /// Entries in order of appearance.
     pub entries: Vec<RawEntry>,
 }

@@ -1,4 +1,4 @@
-//! Tests de extremo a extremo del motor: precedencia, interpolación y procedencia.
+//! End-to-end engine tests: precedence, interpolation and provenance.
 
 use std::collections::BTreeMap;
 
@@ -18,14 +18,14 @@ db:
   url: \"${db.host}:${db.port}\"
 name: \"${env:APP_NAME}\"
 escaped: '\\${not.a.ref}'
-fallback: \"${missing.key:-por-defecto}\"
+fallback: \"${missing.key:-by-default}\"
 ";
 
 fn snapshot() -> keydex_core::Snapshot {
     let mut builder = Builder::new().with_env(env(&[
         ("APP_DB__HOST", "env.internal"),
-        ("APP_NAME", "servicio"),
-        ("OTRA", "ignorada"),
+        ("APP_NAME", "service"),
+        ("OTHER", "ignored"),
     ]));
     builder.env_source("APP_", Tier::Environment);
     builder
@@ -35,14 +35,14 @@ fn snapshot() -> keydex_core::Snapshot {
 }
 
 #[test]
-fn el_entorno_gana_al_fichero() {
+fn environment_wins_over_file() {
     let cfg = snapshot();
     assert_eq!(cfg.get("db.host"), Some(&Value::str("env.internal")));
     assert_eq!(cfg.get("db.port"), Some(&Value::Int(5432)));
 }
 
 #[test]
-fn explain_dice_quien_gano_y_quien_perdio() {
+fn explain_reports_winner_and_shadowed() {
     let cfg = snapshot();
     let explanation = cfg.explain("db.host").unwrap();
 
@@ -50,45 +50,45 @@ fn explain_dice_quien_gano_y_quien_perdio() {
     assert_eq!(explanation.winner.tier, Tier::Environment);
 
     assert_eq!(explanation.shadowed.len(), 1);
-    let sombreado = &explanation.shadowed[0];
-    assert_eq!(sombreado.source, "file:app.yaml");
-    let span = sombreado.span.as_ref().unwrap();
+    let shadowed = &explanation.shadowed[0];
+    assert_eq!(shadowed.source, "file:app.yaml");
+    let span = shadowed.span.as_ref().unwrap();
     assert_eq!(span.line, 2);
     assert_eq!(span.col, 8);
 }
 
 #[test]
-fn la_interpolacion_hereda_el_tipo() {
-    // `${db.port}` es un entero dentro de una cadena: se sustituye por su texto.
+fn interpolation_keeps_the_type() {
+    // `${db.port}` is an integer inside a string: it is substituted by its text.
     let cfg = snapshot();
     assert_eq!(cfg.get("db.url"), Some(&Value::str("env.internal:5432")));
 }
 
 #[test]
-fn resuelve_el_resolver_env() {
+fn resolves_the_env_resolver() {
     let cfg = snapshot();
-    assert_eq!(cfg.get("name"), Some(&Value::str("servicio")));
+    assert_eq!(cfg.get("name"), Some(&Value::str("service")));
 }
 
 #[test]
-fn las_placeholders_escapadas_quedan_literales() {
+fn escaped_placeholders_stay_literal() {
     let cfg = snapshot();
     assert_eq!(cfg.get("escaped"), Some(&Value::str("${not.a.ref}")));
 }
 
 #[test]
-fn usa_el_default_cuando_falta_la_clave() {
+fn uses_the_default_when_the_key_is_missing() {
     let cfg = snapshot();
-    assert_eq!(cfg.get("fallback"), Some(&Value::str("por-defecto")));
+    assert_eq!(cfg.get("fallback"), Some(&Value::str("by-default")));
 }
 
 #[test]
-fn una_referencia_inexistente_sin_default_es_error() {
+fn a_missing_reference_without_default_is_an_error() {
     let mut builder = Builder::new();
     builder
         .document(
-            "rota.yaml",
-            "a: \"${no.existe}\"\n",
+            "broken.yaml",
+            "a: \"${does.not.exist}\"\n",
             Format::Yaml,
             Tier::BaseFile,
         )
@@ -96,16 +96,16 @@ fn una_referencia_inexistente_sin_default_es_error() {
     let error = builder.build().unwrap_err();
     assert!(matches!(
         error,
-        Error::MissingReference { ref reference, .. } if reference == "no.existe"
+        Error::MissingReference { ref reference, .. } if reference == "does.not.exist"
     ));
 }
 
 #[test]
-fn detecta_ciclos_con_traza() {
+fn detects_cycles_with_a_trace() {
     let mut builder = Builder::new();
     builder
         .document(
-            "ciclo.yaml",
+            "cycle.yaml",
             "a: \"${b}\"\nb: \"${a}\"\n",
             Format::Yaml,
             Tier::BaseFile,
@@ -114,15 +114,15 @@ fn detecta_ciclos_con_traza() {
     let error = builder.build().unwrap_err();
     match error {
         Error::InterpolationCycle { cycle } => {
-            assert!(cycle.contains("a"), "traza: {cycle}");
-            assert!(cycle.contains("b"), "traza: {cycle}");
+            assert!(cycle.contains('a'), "trace: {cycle}");
+            assert!(cycle.contains('b'), "trace: {cycle}");
         }
-        otro => panic!("se esperaba InterpolationCycle, llegó {otro:?}"),
+        other => panic!("expected InterpolationCycle, got {other:?}"),
     }
 }
 
 #[test]
-fn explain_registra_las_referencias_usadas() {
+fn explain_records_the_references_used() {
     let cfg = snapshot();
     let explanation = cfg.explain("db.url").unwrap();
     assert!(explanation.refs.contains(&"db.host".to_string()));
@@ -130,7 +130,7 @@ fn explain_registra_las_referencias_usadas() {
 }
 
 #[test]
-fn toml_conserva_spans() {
+fn toml_keeps_spans() {
     let mut builder = Builder::new();
     builder
         .document(
@@ -149,7 +149,7 @@ fn toml_conserva_spans() {
 }
 
 #[test]
-fn json_conserva_spans_y_no_convierte_enteros_en_flotantes() {
+fn json_keeps_spans_and_does_not_turn_integers_into_floats() {
     let mut builder = Builder::new();
     builder
         .document(
@@ -168,11 +168,11 @@ fn json_conserva_spans_y_no_convierte_enteros_en_flotantes() {
 }
 
 #[test]
-fn las_listas_se_aplanan_con_indices() {
+fn lists_are_flattened_with_indices() {
     let mut builder = Builder::new();
     builder
         .document(
-            "lista.yaml",
+            "list.yaml",
             "servers:\n  - host: a\n  - host: b\n",
             Format::Yaml,
             Tier::BaseFile,
@@ -184,32 +184,32 @@ fn las_listas_se_aplanan_con_indices() {
 }
 
 #[test]
-fn el_orden_de_fuentes_dentro_de_la_banda_decide() {
+fn source_order_inside_a_band_decides() {
     let mut builder = Builder::new();
     builder
-        .document("a.yaml", "k: primera\n", Format::Yaml, Tier::BaseFile)
+        .document("a.yaml", "k: first\n", Format::Yaml, Tier::BaseFile)
         .unwrap();
     builder
-        .document("b.yaml", "k: segunda\n", Format::Yaml, Tier::BaseFile)
+        .document("b.yaml", "k: second\n", Format::Yaml, Tier::BaseFile)
         .unwrap();
     let cfg = builder.build().unwrap();
 
-    assert_eq!(cfg.get("k"), Some(&Value::str("segunda")));
+    assert_eq!(cfg.get("k"), Some(&Value::str("second")));
     let explanation = cfg.explain("k").unwrap();
     assert_eq!(explanation.shadowed.len(), 1);
     assert_eq!(explanation.shadowed[0].source, "file:a.yaml");
 }
 
 #[test]
-fn el_build_es_determinista() {
+fn the_build_is_deterministic() {
     let a: Vec<String> = snapshot().keys().map(ToString::to_string).collect();
     let b: Vec<String> = snapshot().keys().map(ToString::to_string).collect();
     assert_eq!(a, b);
-    assert!(a.windows(2).all(|w| w[0] <= w[1]), "claves desordenadas");
+    assert!(a.windows(2).all(|w| w[0] <= w[1]), "keys not sorted");
 }
 
 #[test]
-fn las_claves_sin_prefijo_se_ignoran() {
+fn keys_without_the_prefix_are_ignored() {
     let cfg = snapshot();
-    assert!(cfg.get("otra").is_none());
+    assert!(cfg.get("other").is_none());
 }

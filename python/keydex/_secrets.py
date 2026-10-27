@@ -1,4 +1,4 @@
-"""Valores sensibles."""
+"""Sensitive values."""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ T = TypeVar("T")
 
 
 class Secret(Generic[T]):
-    """Valor sensible cuya representación nunca lo revela.
+    """Sensitive value whose representation never reveals it.
 
-    Se usa en modelos tipados: `password: Secret[str]`. El valor real solo sale con
-    :meth:`reveal`, así que un `repr`, un log o un `print` del dataclass no lo filtran.
+    Used in typed models: `password: Secret[str]`. The real value only leaves through
+    :meth:`reveal`, so a `repr`, a log line or a `print` of the dataclass cannot leak it.
     """
 
     __slots__ = ("_value",)
@@ -20,7 +20,7 @@ class Secret(Generic[T]):
         self._value = value
 
     def reveal(self) -> T:
-        """Devuelve el valor en claro. Úsalo solo en el punto donde se consume."""
+        """Returns the value in the clear. Use it only where it is consumed."""
         return self._value
 
     def __repr__(self) -> str:

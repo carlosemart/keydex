@@ -1,78 +1,78 @@
-//! Errores estructurados del motor.
+//! Structured engine errors.
 
-/// Resultado del motor.
+/// Engine result.
 pub type Result<T> = core::result::Result<T, Error>;
 
-/// Error del motor.
+/// Engine error.
 ///
-/// Siempre estructurado: cada capa decide cómo formatearlo (excepción en Python,
-/// JSON en la CLI). Nunca se devuelve un `String` como error.
+/// Always structured: each layer decides how to format it (an exception in Python, JSON
+/// in the CLI). A plain `String` is never returned as an error.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// Una fuente no se puede leer o no existe.
-    #[error("origen no disponible: {name}: {reason}")]
+    /// A source cannot be read or does not exist.
+    #[error("source unavailable: {name}: {reason}")]
     SourceUnavailable {
-        /// Nombre lógico de la fuente.
+        /// Logical source name.
         name: String,
-        /// Motivo legible.
+        /// Human readable reason.
         reason: String,
     },
 
-    /// No se pudo deducir el formato del documento.
-    #[error("formato desconocido para {file}")]
+    /// The document format could not be inferred.
+    #[error("unknown format for {file}")]
     UnknownFormat {
-        /// Fichero implicado.
+        /// File involved.
         file: String,
     },
 
-    /// El parser rechazó el documento.
+    /// The parser rejected the document.
     #[error("{file}: {message}")]
     Parse {
-        /// Fichero implicado.
+        /// File involved.
         file: String,
-        /// Mensaje del parser.
+        /// Parser message.
         message: String,
     },
 
-    /// El formato está desactivado por feature flags en este build.
-    #[error("formato no disponible en este build: {format}")]
+    /// The format is disabled by feature flags in this build.
+    #[error("format not available in this build: {format}")]
     UnsupportedFormat {
-        /// Nombre del formato.
+        /// Format name.
         format: String,
     },
 
-    /// Una referencia `${...}` apunta a una clave que no existe.
-    #[error("referencia inexistente: {reference} (usada en {path})")]
+    /// A `${...}` reference points to a key that does not exist.
+    #[error("missing reference: {reference} (used in {path})")]
     MissingReference {
-        /// Clave donde aparece el placeholder.
+        /// Key where the placeholder appears.
         path: String,
-        /// Referencia que no resuelve.
+        /// Reference that does not resolve.
         reference: String,
     },
 
-    /// Ciclo en el grafo de interpolación.
-    #[error("ciclo de interpolación: {cycle}")]
+    /// Cycle in the interpolation graph.
+    #[error("interpolation cycle: {cycle}")]
     InterpolationCycle {
-        /// Recorrido del ciclo, separado por ` -> `.
+        /// Cycle path, separated by ` -> `.
         cycle: String,
     },
 
-    /// Placeholder con sintaxis inválida.
-    #[error("placeholder mal formado en {path}: {snippet}")]
+    /// Placeholder with invalid syntax.
+    #[error("malformed placeholder in {path}: {snippet}")]
     MalformedPlaceholder {
-        /// Clave donde aparece el placeholder.
+        /// Key where the placeholder appears.
         path: String,
-        /// Fragmento ofensor.
+        /// Offending fragment.
         snippet: String,
     },
 
-    /// Dos rutas del esquema empatan para la misma variable de entorno.
-    #[error("binding ambiguo para {env_var}: {candidates:?}")]
+    /// Two schema paths tie for the same environment variable.
+    #[error("ambiguous binding for {env_var}: {candidates:?}")]
     AmbiguousBinding {
-        /// Variable de entorno implicada.
+        /// Environment variable involved.
         env_var: String,
-        /// Rutas del esquema que empatan.
+        /// Schema paths that tie.
         candidates: Vec<String>,
     },
 }

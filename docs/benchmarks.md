@@ -1,24 +1,23 @@
 # Benchmarks
 
-Metodología: mediana de 50 ejecuciones, documento YAML de 1004 claves (10,7 KiB),
-`env_prefix` sin variables, Python 3.15, AMD Ryzen 9 7940HS. Ejecutar con
+Methodology: median of 50 runs, YAML document with 1004 keys (10.7 KiB), `env_prefix`
+without variables, Python 3.15, AMD Ryzen 9 7940HS. Run with
 `python/bench/bench_load.py`.
 
-## F1 — carga (2026-10-27)
+## F1 — load (2026-10-27)
 
-| Operación | Mediana |
+| Operation | Median |
 |---|---|
-| `keydex.load` | **1,26 ms** |
-| `OmegaConf.load` | 26,42 ms |
-| `cfg.explain("k0500")` | < 0,01 ms |
-| acceso `oc.k0500` (OmegaConf) | < 0,01 ms |
+| `keydex.load` | **1.26 ms** |
+| `OmegaConf.load` | 26.42 ms |
+| `cfg.explain("k0500")` | < 0.01 ms |
+| `oc.k0500` access (OmegaConf) | < 0.01 ms |
 
-**21× más rápido que OmegaConf** y dentro del presupuesto de la especificación
-(< 5 ms para 1000 claves).
+**21× faster than OmegaConf**, inside the specification budget (< 5 ms for 1000 keys).
 
-No es una comparación del todo justa, y conviene decirlo: `keydex.load` hace más trabajo
-que OmegaConf —merge por bandas, expansión de `${...}`, `LineIndex` y procedencia por
-valor—. El margen viene de no construir un árbol de objetos Python por nodo.
+The comparison is not entirely fair, and it is worth saying: `keydex.load` does more work
+than OmegaConf — band merging, `${...}` expansion, `LineIndex` and per-value provenance.
+The margin comes from not building a tree of Python objects per node.
 
-Pendiente de medir en fases siguientes: `refresh()`, decode a dataclass (F2) y accesos
-masivos desde Python.
+Still to measure in later phases: `refresh()`, dataclass decoding (F2) and bulk access
+from Python.

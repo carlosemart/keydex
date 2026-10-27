@@ -1,14 +1,14 @@
-# Spike: spans en los parsers
+# Spikes: parser spans
 
-Crates de experimentación que **no forman parte del workspace** (cada uno declara su
-propio `[workspace]`). No se publican y no se ejecutan en CI: son evidencia reproducible
-de una decisión, no código de producción.
+Experimental crates that are **not part of the workspace** (each declares its own
+`[workspace]`). They are not published and do not run in CI: they are reproducible
+evidence for a decision, not production code.
 
-| Spike | Pregunta | Resultado |
+| Spike | Question | Result |
 |---|---|---|
-| [`spans/`](spans/) | ¿YAML/TOML/JSON pueden darnos línea y columna, y a qué coste? | [docs/spikes/0001-parsers-spans.md](../../docs/spikes/0001-parsers-spans.md) |
+| [`spans/`](spans/) | Can YAML/TOML/JSON give us line and column, and at what cost? | [docs/spikes/0001-parsers-spans.md](../../docs/spikes/0001-parsers-spans.md) |
 
-## Ejecutar
+## Run
 
 ```bash
 cd spikes/spans

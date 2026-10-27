@@ -1,15 +1,15 @@
-//! Fuente de variables de entorno.
+//! Environment variable source.
 
 use std::collections::BTreeMap;
 
 use crate::source::RawEntry;
 use crate::value::Value;
 
-/// Convierte variables de entorno ya capturadas en entradas planas.
+/// Turns already captured environment variables into flat entries.
 ///
-/// Reglas del **modo diccionario** (sin esquema, ver especificación §6.2): el prefijo se
-/// elimina sin distinguir mayúsculas, `__` separa niveles y `_` es un carácter literal.
-/// No hay heurísticas: sin esquema no se adivina.
+/// **Dictionary mode** rules (no schema, see specification §6.2): the prefix is stripped
+/// case-insensitively, `__` separates levels and `_` is a literal character. No guessing:
+/// without a schema we do not infer.
 #[must_use]
 pub fn parse(env: &BTreeMap<String, String>, prefix: &str) -> Vec<RawEntry> {
     let wanted = prefix.to_ascii_uppercase();

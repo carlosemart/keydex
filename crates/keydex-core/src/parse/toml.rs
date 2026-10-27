@@ -1,6 +1,6 @@
-//! TOML con spans, vía `toml_edit`.
+//! TOML with spans, through `toml_edit`.
 //!
-//! Nota: `DocumentMut` descarta los spans; hay que usar `Document` (antes `ImDocument`).
+//! Note: `DocumentMut` drops spans; `Document` (formerly `ImDocument`) must be used.
 
 use toml_edit::{Document, Item, Table, Value as TomlValue};
 

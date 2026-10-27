@@ -1,26 +1,26 @@
 # keydex
 
-Acceso a configuración para Python: **tipado, explicable y rápido**, con el motor en Rust.
+Configuration access for Python: **typed, explainable and fast**, with the engine in Rust.
 
-> Estado: F3. Modelos tipados, perfiles, secretos, `refresh()` y CLI. Pendiente: F4
-> (publicación de wheels) y las fuentes remotas. En PyPI solo hay un placeholder de
-> reserva: por ahora se instala desde el repo.
+> Status: 0.1.0. Typed models, profiles, secrets, `refresh()` and a CLI. Pending: F4
+> publication of wheels and remote sources. PyPI only has a name-reservation placeholder,
+> so install from the repository for now.
 
-## Instalación
+## Install
 
-Aún no hay release pública: en PyPI solo está el `0.0.1` de reserva. La `0.1.0` se
-publica empujando el tag `v0.1.0` (ver [publicación](docs/release.md)).
+There is no public release yet: PyPI only holds the `0.0.1` reservation. `0.1.0` is
+published by pushing the `v0.1.0` tag (see [release](docs/release.md)).
 
-Mientras tanto, desde el repo:
+In the meantime, from the repository:
 
 ```bash
 uv venv
 uv pip install -e .
 ```
 
-Se publican wheels `abi3` para Python 3.11–3.15 y un wheel `cp314t` para free-threading.
+Published wheels are `abi3` for Python 3.11–3.15 plus a `cp314t` wheel for free-threading.
 
-## Uso
+## Usage
 
 ```python
 from dataclasses import dataclass, field
@@ -37,38 +37,38 @@ class App:
     debug: bool = False
     tags: list[str] = field(default_factory=list)
 
-# Tipado: valida, coacciona y devuelve el modelo
+# Typed: validates, coerces and returns the model
 cfg = keydex.load(App, files=["config/app.yaml"], env_prefix="APP_")
-cfg.db.port        # int de verdad, no "5432"
+cfg.db.port        # a real int, not "5432"
 
-# Diccionario: sin modelo, con procedencia
+# Dictionary mode: no model, with provenance
 raw = keydex.load_settings(files=["config/app.yaml"], env_prefix="APP_")
 raw["db.host"]
 raw.explain("db.host")
 ```
 
-`APP_DB_HOST` casa con `db.host` sin necesidad de `__`: el esquema desambigua.
+`APP_DB_HOST` matches `db.host` without needing `__`: the schema disambiguates.
 
-Los errores se agregan, no se aborta en el primero:
+Errors are aggregated instead of failing on the first one:
 
 ```python
 try:
     keydex.load(App, files=["config/app.yaml"], env_prefix="APP_")
 except keydex.ValidationError as error:
     error.errors
-    # [{"path": "db.port", "message": "se esperaba un entero, llegó \"muchos\""}]
+    # [{"path": "db.port", "message": "expected an integer, got \"many\""}]
 ```
 
-Las claves que ningún campo del modelo usa avisan, con sugerencia:
+Keys that no model field uses produce a warning with a suggestion:
 
 ```
-UnknownKeyWarning: db.prot: clave desconocida, ¿quisiste decir "db.port"?
+UnknownKeyWarning: db.prot: unknown key, did you mean "db.port"?
 ```
 
-Se controla con `on_unknown="warn" | "error" | "ignore"`. Es la red de seguridad contra
-el fallo más silencioso: un override mal escrito que nunca llega a aplicarse.
+Controlled with `on_unknown="warn" | "error" | "ignore"`. It is the safety net against
+the quietest failure: a misspelled override that never applies.
 
-El `explain` devuelve una estructura, no un texto:
+The `explain` output is a structure, not text:
 
 ```python
 {
@@ -83,17 +83,17 @@ El `explain` devuelve una estructura, no un texto:
 }
 ```
 
-## Perfiles
+## Profiles
 
 ```python
-# app.yaml + app-prod.yaml (mismo directorio, mismo nombre con sufijo)
+# app.yaml + app-prod.yaml (same directory, suffixed name)
 cfg = keydex.load(App, files=["config/app.yaml"], profiles=["prod"])
 ```
 
-El perfil se aplica en la banda `ProfileFile`, por encima del fichero base. Si el
-fichero de perfil no existe se ignora; si hay varios perfiles, el último gana.
+The profile is applied in the `ProfileFile` band, above the base file. A missing profile
+file is ignored; with several profiles the last one wins.
 
-## Secretos
+## Secrets
 
 ```python
 from keydex import Secret
@@ -103,21 +103,21 @@ class Db:
     password: Secret[str]
 
 cfg.db.password            # Secret('***')
-cfg.db.password.reveal()   # el valor real
+cfg.db.password.reveal()   # the real value
 ```
 
-`repr`, `str` y cualquier log del dataclass muestran `***`. Además se admite la
-indirección de Docker/K8s:
+`repr`, `str` and any log of the dataclass show `***`. Docker/K8s indirection is also
+supported:
 
 ```bash
 APP_DB__PASSWORD_FILE=/run/secrets/db_password
 ```
 
-## Recarga
+## Reload
 
 ```python
 cfg = keydex.load_settings(files=["app.yaml"])
-cfg.refresh()      # relee; si falla, el snapshot vigente se mantiene
+cfg.refresh()      # re-reads; if it fails the current snapshot is kept
 ```
 
 ## CLI
@@ -127,47 +127,47 @@ python -m keydex explain db.host --files config/app.yaml --env-prefix APP_
 python -m keydex dump --files config/app.yaml
 ```
 
-## La idea
+## Why
 
 ```python
 cfg = keydex.load(AppConfig, profiles=["prod"])
-cfg.db.host                 # valor + tipo correctos, sin FFI por acceso
-cfg.explain("db.host")      # de dónde sale, quién lo sombreó y qué placeholders usó
+cfg.db.host                 # right value, right type, no FFI per access
+cfg.explain("db.host")      # where it comes from, who shadowed it, what it used
 ```
 
-Lo que aporta frente a `dynaconf`, `omegaconf` o `pydantic-settings`:
+What it adds over `dynaconf`, `omegaconf` or `pydantic-settings`:
 
-- **Procedencia de primera clase**: cada valor sabe qué fuente, fichero y línea lo
-  definió. No es un mensaje de error: es una estructura consultable.
-- **Precedencia explícita** por bandas, con inserción relativa de fuentes nuevas.
-- **Relaxed binding** resuelto contra el esquema, no por heurísticas.
-- **Sin `eval`**: interpolación de referencias y resolvers puros, nada de expresiones.
-- **Rendimiento**: el parseo, el merge y la interpolación ocurren una vez en Rust; los
-  accesos son Python nativo.
+- **First-class provenance**: every value knows which source, file and line defined it.
+  It is not an error message, it is a queryable structure.
+- **Explicit precedence** by bands, with relative insertion of new sources.
+- **Relaxed binding** resolved against the schema, not by heuristics.
+- **No `eval`**: reference interpolation and pure resolvers, no expressions.
+- **Performance**: parsing, merging and interpolation happen once in Rust; access is
+  native Python.
 
-## Qué no es
+## What it is not
 
-Un contenedor de inyección de dependencias, un motor de expresiones, un framework de
-aplicación, ni una capa de bindings multi-lenguaje. Ver `AGENTS.md`.
+A dependency injection container, an expression engine, an application framework or a
+multi-language binding layer. See `AGENTS.md`.
 
-## Documentación
+## Documentation
 
-- [Especificación](docs/spec.md)
-- [Decisiones de arquitectura](docs/adr/)
-- [Instrucciones para agentes](AGENTS.md)
-- [Ejemplo ejecutable: servicio de homelab](examples/homelab-demo/)
+- [Specification](docs/spec.md)
+- [Architecture decisions](docs/adr/)
+- [Agent instructions](AGENTS.md)
+- [Runnable example: homelab service](examples/homelab-demo/)
 
-## Desarrollo
+## Development
 
 ```bash
 ./scripts/check.sh     # fmt + clippy
 cargo test --workspace --exclude keydex-py
-./scripts/gate.sh      # invariantes de arquitectura
+./scripts/gate.sh      # architecture invariants
 ```
 
-`scripts/gate.sh` avisa y se salta `cargo deny` si no está instalado. Para tener paridad
-con CI: `cargo install cargo-deny --locked`.
+`scripts/gate.sh` warns and skips `cargo deny` when it is not installed. For CI parity:
+`cargo install cargo-deny --locked`.
 
-## Licencia
+## License
 
-MIT OR Apache-2.0, a elección del usuario.
+MIT OR Apache-2.0, at your option.

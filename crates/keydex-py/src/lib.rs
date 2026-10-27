@@ -1,15 +1,15 @@
-//! Binding de Python (PyO3) para `keydex`.
+//! Python binding (PyO3) for `keydex`.
 //!
-//! Capa fina: no implementa semántica, solo traduce. El motor construye un snapshot
-//! inmutable y `Settings` solo lo consulta; `refresh()` construye otro y lo intercambia
-//! de forma atómica.
+//! Thin layer: it implements no semantics, it only translates. The engine builds an
+//! immutable snapshot and `Settings` only reads it; `refresh()` builds another one and
+//! swaps it atomically.
 //!
-//! `extension-module` está activo siempre, así que este crate **no** se puede enlazar en
-//! `cargo test --workspace` (requiere libpython). Se compila con `cargo check -p
-//! keydex-py` y se enlaza desde maturin.
+//! `extension-module` is always on, so this crate **cannot** be linked by
+//! `cargo test --workspace` (it needs libpython). It is checked with `cargo check -p
+//! keydex-py` and linked by maturin.
 //!
-//! El módulo declara `gil_used = false`: no hay estado global mutable (el snapshot vive
-//! tras un `RwLock`) y todas las operaciones son seguras sin GIL.
+//! The module declares `gil_used = false`: there is no mutable global state (the snapshot
+//! lives behind an `RwLock`) and every operation is safe without the GIL.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -27,7 +27,7 @@ use pyo3::types::{PyDict, PyList};
 
 create_exception!(keydex, KeydexError, PyException);
 
-/// Todo lo necesario para reconstruir el snapshot en `refresh()`.
+/// Everything needed to rebuild the snapshot in `refresh()`.
 #[derive(Debug, Clone)]
 struct Spec {
     files: Vec<String>,
@@ -36,7 +36,7 @@ struct Spec {
     env: BTreeMap<String, String>,
 }
 
-/// Configuración resuelta, inmutable y consultable por clave.
+/// Resolved configuration, immutable and queryable by key.
 #[pyclass(name = "Settings", module = "keydex", frozen)]
 struct PySettings {
     spec: Spec,
@@ -48,13 +48,13 @@ impl PySettings {
         self.inner
             .read()
             .map(|guard| Arc::clone(&guard))
-            .map_err(|_| KeydexError::new_err("estado interno envenenado"))
+            .map_err(|_| KeydexError::new_err("internal state poisoned"))
     }
 }
 
 #[pymethods]
 impl PySettings {
-    /// Devuelve el valor de una clave, o `default` si no existe.
+    /// Returns the value of a key, or `default` when it does not exist.
     #[pyo3(signature = (key, default = None))]
     fn get(&self, py: Python<'_>, key: &str, default: Option<Py<PyAny>>) -> PyResult<Py<PyAny>> {
         match self.snapshot()?.get(key) {
@@ -63,7 +63,7 @@ impl PySettings {
         }
     }
 
-    /// Igual que `get`, pero lanza `KeyError` si la clave no existe.
+    /// Same as `get`, but raises `KeyError` when the key does not exist.
     fn __getitem__(&self, py: Python<'_>, key: &str) -> PyResult<Py<PyAny>> {
         match self.snapshot()?.get(key) {
             Some(value) => to_py(py, value),
@@ -79,12 +79,12 @@ impl PySettings {
         Ok(self.snapshot()?.len())
     }
 
-    /// Claves en orden lexicográfico.
+    /// Keys in lexicographic order.
     fn keys(&self) -> PyResult<Vec<String>> {
         Ok(self.snapshot()?.keys().map(ToString::to_string).collect())
     }
 
-    /// Pares (clave, valor) en orden lexicográfico.
+    /// `(key, value)` pairs in lexicographic order.
     fn items(&self, py: Python<'_>) -> PyResult<Vec<(String, Py<PyAny>)>> {
         let snapshot = self.snapshot()?;
         snapshot
@@ -93,7 +93,7 @@ impl PySettings {
             .collect()
     }
 
-    /// Procedencia de una clave, o `None` si no existe.
+    /// Provenance of a key, or `None` when it does not exist.
     fn explain(&self, py: Python<'_>, key: &str) -> PyResult<Py<PyAny>> {
         match self.snapshot()?.explain(key) {
             Some(explanation) => explanation_to_py(py, &explanation),
@@ -101,15 +101,16 @@ impl PySettings {
         }
     }
 
-    /// Relee las fuentes y sustituye el snapshot.
+    /// Re-reads the sources and replaces the snapshot.
     ///
-    /// Si algo falla, el snapshot vigente se mantiene: nunca queda configuración a medias.
+    /// If anything fails the current snapshot is kept: configuration is never left half
+    /// applied.
     fn refresh(&self) -> PyResult<()> {
         let snapshot = build_snapshot(&self.spec)?;
         let mut guard = self
             .inner
             .write()
-            .map_err(|_| KeydexError::new_err("estado interno envenenado"))?;
+            .map_err(|_| KeydexError::new_err("internal state poisoned"))?;
         *guard = Arc::new(snapshot);
         Ok(())
     }
@@ -121,7 +122,7 @@ impl PySettings {
 
 #[pyfunction]
 #[pyo3(signature = (files, env_prefix = "", env = None, profiles = Vec::new()))]
-/// Carga uno o varios ficheros y les aplica variables de entorno y perfiles.
+/// Loads one or several files and applies environment variables and profiles.
 fn load(
     files: Vec<String>,
     env_prefix: &str,
@@ -146,10 +147,10 @@ fn load(
 
 #[pyfunction]
 #[pyo3(signature = (ir, files, env_prefix = "", env = None, profiles = Vec::new(), on_unknown = "warn"))]
-/// Carga con esquema: binding relajado, coerción y validación.
+/// Loads with a schema: relaxed binding, coercion and validation.
 ///
-/// Devuelve `(errores, avisos, arbol)`. La capa de Python decide qué excepción lanzar;
-/// el motor no conoce las clases de excepción de Python.
+/// Returns `(errors, warnings, tree)`. The Python layer decides which exception to
+/// raise; the engine does not know about Python exception classes.
 fn load_typed(
     py: Python<'_>,
     ir: &str,
@@ -178,20 +179,20 @@ fn load_typed(
 
     let snapshot = builder.build().map_err(to_py_err)?;
 
-    let coerceado = coerce(&snapshot, &schema);
-    let desconocidas = unknown_keys(&snapshot, &schema);
+    let coerced = coerce(&snapshot, &schema);
+    let unknown = unknown_keys(&snapshot, &schema);
 
     let mut errors: Vec<(String, String)> = Vec::new();
     let mut warnings: Vec<(String, String)> = Vec::new();
 
-    let payload = match coerceado {
+    let payload = match coerced {
         Ok(tree) => {
-            for item in desconocidas {
+            for item in unknown {
                 let message = match &item.suggestion {
                     Some(suggestion) => {
-                        format!("clave desconocida, ¿quisiste decir {suggestion:?}?")
+                        format!("unknown key, did you mean {suggestion:?}?")
                     }
-                    None => String::from("clave desconocida"),
+                    None => String::from("unknown key"),
                 };
                 match on_unknown {
                     "ignore" => {}
@@ -218,18 +219,6 @@ fn load_typed(
     ))
 }
 
-fn pairs_to_py(py: Python<'_>, pairs: &[(String, String)]) -> PyResult<Vec<Py<PyAny>>> {
-    pairs
-        .iter()
-        .map(|(path, message)| {
-            let dict = PyDict::new(py);
-            dict.set_item("path", path)?;
-            dict.set_item("message", message)?;
-            Ok(dict.into_any().unbind())
-        })
-        .collect()
-}
-
 fn build_snapshot(spec: &Spec) -> PyResult<Snapshot> {
     let mut builder = Builder::new().with_env(spec.env.clone());
     builder.env_source(&spec.env_prefix, Tier::Environment);
@@ -237,10 +226,10 @@ fn build_snapshot(spec: &Spec) -> PyResult<Snapshot> {
     builder.build().map_err(to_py_err)
 }
 
-/// Añade los ficheros base y, después, los de cada perfil activo.
+/// Adds the base files and, after them, those of every active profile.
 ///
-/// Convención: `app.yaml` + perfil `prod` → `app-prod.yaml`, en el mismo directorio. Si
-/// el fichero de perfil no existe se ignora; el último perfil de la lista gana.
+/// Convention: `app.yaml` + profile `prod` -> `app-prod.yaml`, in the same directory. If
+/// the profile file does not exist it is ignored; the last profile in the list wins.
 fn add_documents(builder: &mut Builder, spec: &Spec) -> PyResult<()> {
     for path in &spec.files {
         let (contents, format) = read_document(path)?;
@@ -268,11 +257,11 @@ fn read_document(path: &str) -> PyResult<(String, Format)> {
     let contents = std::fs::read_to_string(path)
         .map_err(|err| KeydexError::new_err(format!("{path}: {err}")))?;
     let format = Format::from_path(path)
-        .ok_or_else(|| KeydexError::new_err(format!("formato desconocido para {path}")))?;
+        .ok_or_else(|| KeydexError::new_err(format!("unknown format for {path}")))?;
     Ok((contents, format))
 }
 
-/// `dir/app.yaml` + `prod` → `dir/app-prod.yaml`, si existe.
+/// `dir/app.yaml` + `prod` -> `dir/app-prod.yaml`, when it exists.
 fn profile_path(base: &str, profile: &str) -> Option<String> {
     let path = Path::new(base);
     let stem = path.file_stem()?.to_str()?;
@@ -292,8 +281,8 @@ fn to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> {
         Value::Int(i) => i.into_py_any(py)?,
         Value::Float(f) => f.into_py_any(py)?,
         Value::Str(s) => s.into_py_any(py)?,
-        // `Value` es `non_exhaustive`: un valor futuro se expone como `None` hasta que
-        // esta capa lo traduzca.
+        // `Value` is `non_exhaustive`: a future value is exposed as `None` until this
+        // layer translates it.
         _ => py.None(),
     })
 }
@@ -326,6 +315,18 @@ fn json_to_py(py: Python<'_>, value: &serde_json::Value) -> PyResult<Py<PyAny>> 
 
 fn to_py_err(error: Error) -> PyErr {
     KeydexError::new_err(error.to_string())
+}
+
+fn pairs_to_py(py: Python<'_>, pairs: &[(String, String)]) -> PyResult<Vec<Py<PyAny>>> {
+    pairs
+        .iter()
+        .map(|(path, message)| {
+            let dict = PyDict::new(py);
+            dict.set_item("path", path)?;
+            dict.set_item("message", message)?;
+            Ok(dict.into_any().unbind())
+        })
+        .collect()
 }
 
 fn provenance_to_py(py: Python<'_>, provenance: &Provenance) -> PyResult<Py<PyAny>> {

@@ -1,4 +1,4 @@
-"""Tests de la API pública de Python."""
+"""Public Python API tests."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ db:
   host: file.internal
   port: 5432
   url: "${db.host}:${db.port}"
-name: "${env:APP_NAME:-anonimo}"
+name: "${env:APP_NAME:-anonymous}"
 """
 
 
@@ -23,21 +23,21 @@ def write(tmp_path: Path, text: str, name: str = "app.yaml") -> str:
     return str(path)
 
 
-def test_entorno_gana_al_fichero(tmp_path: Path) -> None:
+def test_environment_wins_over_file(tmp_path: Path) -> None:
     path = write(tmp_path, YAML)
     cfg = keydex.load_settings([path], env_prefix="APP_", env={"APP_DB__HOST": "env.internal"})
     assert cfg["db.host"] == "env.internal"
     assert cfg.get("db.port") == 5432
 
 
-def test_interpolacion_y_default(tmp_path: Path) -> None:
+def test_interpolation_and_default(tmp_path: Path) -> None:
     path = write(tmp_path, YAML)
     cfg = keydex.load_settings([path], env_prefix="APP_", env={})
     assert cfg["db.url"] == "file.internal:5432"
-    assert cfg["name"] == "anonimo"
+    assert cfg["name"] == "anonymous"
 
 
-def test_explain_es_estructurado(tmp_path: Path) -> None:
+def test_explain_is_structured(tmp_path: Path) -> None:
     path = write(tmp_path, YAML)
     cfg = keydex.load_settings([path], env_prefix="APP_", env={"APP_DB__HOST": "env.internal"})
 
@@ -47,59 +47,59 @@ def test_explain_es_estructurado(tmp_path: Path) -> None:
     assert explanation["winner"]["source"] == "env"
     assert explanation["winner"]["tier"] == 2
 
-    (sombreado,) = explanation["shadowed"]
-    assert sombreado["source"] == f"file:{path}"
-    assert sombreado["line"] == 2
-    assert sombreado["col"] == 8
+    (shadowed,) = explanation["shadowed"]
+    assert shadowed["source"] == f"file:{path}"
+    assert shadowed["line"] == 2
+    assert shadowed["col"] == 8
 
 
-def test_explain_de_clave_inexistente_es_none(tmp_path: Path) -> None:
+def test_explain_of_an_unknown_key_is_none(tmp_path: Path) -> None:
     cfg = keydex.load_settings([write(tmp_path, YAML)], env_prefix="APP_", env={})
-    assert cfg.explain("no.existe") is None
+    assert cfg.explain("does.not.exist") is None
 
 
-def test_getitem_lanza_keyerror(tmp_path: Path) -> None:
+def test_getitem_raises_keyerror(tmp_path: Path) -> None:
     cfg = keydex.load_settings([write(tmp_path, YAML)], env_prefix="APP_", env={})
     with pytest.raises(KeyError):
-        cfg["no.existe"]
+        cfg["does.not.exist"]
 
 
-def test_get_con_default(tmp_path: Path) -> None:
+def test_get_with_default(tmp_path: Path) -> None:
     cfg = keydex.load_settings([write(tmp_path, YAML)], env_prefix="APP_", env={})
-    assert cfg.get("no.existe", "por-defecto") == "por-defecto"
+    assert cfg.get("does.not.exist", "fallback") == "fallback"
 
 
-def test_protocolo_de_mapeo(tmp_path: Path) -> None:
+def test_mapping_protocol(tmp_path: Path) -> None:
     cfg = keydex.load_settings([write(tmp_path, YAML)], env_prefix="APP_", env={})
     assert "db.host" in cfg
-    assert "no.existe" not in cfg
+    assert "does.not.exist" not in cfg
     assert len(cfg) == 4
     assert cfg.keys() == ["db.host", "db.port", "db.url", "name"]
     assert dict(cfg.items())["db.port"] == 5432
 
 
-def test_fichero_inexistente(tmp_path: Path) -> None:
+def test_missing_file(tmp_path: Path) -> None:
     with pytest.raises(keydex.KeydexError):
-        keydex.load_settings([str(tmp_path / "no-existe.yaml")])
+        keydex.load_settings([str(tmp_path / "does-not-exist.yaml")])
 
 
-def test_extension_desconocida(tmp_path: Path) -> None:
+def test_unknown_extension(tmp_path: Path) -> None:
     path = write(tmp_path, "a: 1\n", name="app.conf")
     with pytest.raises(keydex.KeydexError):
         keydex.load_settings([path])
 
 
-def test_el_prefijo_se_respeta(tmp_path: Path) -> None:
+def test_prefix_is_respected(tmp_path: Path) -> None:
     cfg = keydex.load_settings(
         [write(tmp_path, YAML)],
         env_prefix="APP_",
-        env={"OTRA_DB__HOST": "no-debe-entrar"},
+        env={"OTHER_DB__HOST": "must-not-enter"},
     )
     assert cfg["db.host"] == "file.internal"
-    assert "otra.db.host" not in cfg
+    assert "other.db.host" not in cfg
 
 
-def test_error_de_parseo_es_keydexerror(tmp_path: Path) -> None:
-    path = write(tmp_path, "a: [sin cerrar\n")
+def test_parse_error_is_keydexerror(tmp_path: Path) -> None:
+    path = write(tmp_path, "a: [unclosed\n")
     with pytest.raises(keydex.KeydexError):
         keydex.load_settings([path])

@@ -1,14 +1,14 @@
-"""Demo: un servicio de homelab cargando su configuración con keydex.
+"""Demo: a homelab service loading its configuration with keydex.
 
-Uso:
+Usage:
     python examples/homelab-demo/src/main.py
     python examples/homelab-demo/src/main.py --profiles prod
     python examples/homelab-demo/src/main.py --profiles prod --explain db.host
 
-Variables de entorno relevantes (todas con prefijo `APP_`):
-    APP_PROFILES=prod                     perfiles activos
-    APP_DB__HOST=db.override              override puntual
-    APP_DB__PASSWORD_FILE=/run/secrets/db contraseña desde fichero
+Relevant environment variables (all with the `APP_` prefix):
+    APP_PROFILES=prod                      active profiles
+    APP_DB__HOST=db.override               one-off override
+    APP_DB__PASSWORD_FILE=/run/secrets/db  password from a file
 """
 
 from __future__ import annotations
@@ -47,22 +47,22 @@ def render(app: App) -> str:
             f"{app.name} ({app.env})",
             f"  db        {app.db.dsn}  pool={app.db.pool_size}",
             f"  api       {app.api.base_url}  timeout={app.api.timeout_s}s"
-            f"  reintentos={app.api.retries}",
-            f"  backup    {app.backup.dir}  retención={app.backup.keep_days}d",
+            f"  retries={app.api.retries}",
+            f"  backup    {app.backup.dir}  retention={app.backup.keep_days}d",
             f"  features  metrics={app.features.metrics} tracing={app.features.tracing}",
-            f"  secreto   {secret!r} ({len(secret.reveal())} bytes cargados)",
+            f"  secret    {secret!r} ({len(secret.reveal())} bytes loaded)",
         ]
     )
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="demo de keydex en un servicio de homelab")
+    parser = argparse.ArgumentParser(description="keydex demo on a homelab service")
     parser.add_argument(
         "--profiles",
         default=os.environ.get("APP_PROFILES", "dev"),
-        help="perfiles separados por comas (por defecto: APP_PROFILES o 'dev')",
+        help="comma separated profiles (default: APP_PROFILES or 'dev')",
     )
-    parser.add_argument("--explain", metavar="CLAVE", help="muestra la procedencia de una clave")
+    parser.add_argument("--explain", metavar="KEY", help="show the provenance of a key")
     args = parser.parse_args(argv)
 
     profiles = split_profiles(args.profiles)
@@ -75,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         explanation = settings.explain(args.explain)
         if explanation is None:
-            print(f"clave desconocida: {args.explain}", file=sys.stderr)
+            print(f"unknown key: {args.explain}", file=sys.stderr)
             return 2
         print(json.dumps(explanation, indent=2, ensure_ascii=False))
         return 0
@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         app = load(profiles)
     except keydex.ValidationError as error:
-        print("configuración inválida:", file=sys.stderr)
+        print("invalid configuration:", file=sys.stderr)
         for item in error.errors:
             print(f"  {item['path']}: {item['message']}", file=sys.stderr)
         return 1

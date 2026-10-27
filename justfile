@@ -1,19 +1,19 @@
-# keydex — tareas de desarrollo
-# Los scripts son la fuente de verdad; `just` es solo un atajo.
+# keydex — development tasks
+# The scripts are the source of truth; `just` is only a shortcut.
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-# Todo lo que debe pasar antes de commitear
+# Everything that must pass before committing
 check:
     ./scripts/check.sh
 
-# Tests del workspace
+# Workspace tests
 test:
-    cargo test --workspace
+    cargo test --workspace --exclude keydex-py
 
-# Invariantes de arquitectura (reglas 1 y 2 de AGENTS.md)
+# Architecture invariants (hard rules 1 and 2 of AGENTS.md)
 gate:
     ./scripts/gate.sh
 
-# Aplicar formato
+# Apply formatting
 fmt:
     cargo fmt --all

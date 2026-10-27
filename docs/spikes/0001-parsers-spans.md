@@ -1,70 +1,72 @@
-# 0001 — Spans en los parsers
+# 0001 — Parser spans
 
-- Fecha: 2026-10-27
+- Date: 2026-10-27
 - Spike: [`spikes/spans/`](../../spikes/spans/)
-- Pregunta: ¿podemos obtener línea y columna de cada clave en YAML, TOML y JSON, y a
-  qué coste?
+- Question: can we get line and column for every key in YAML, TOML and JSON, and at what
+  cost?
 
-## Entorno
+## Environment
 
-Rust 1.99.0, build `--release`, AMD Ryzen 9 7940HS. Fixture de 1000 claves planas más
-3 anidadas; media de 200 iteraciones, incluyendo parseo **y** recorrido completo para
-extraer las rutas.
+Rust 1.99.0, `--release` build, AMD Ryzen 9 7940HS. Fixture with 1000 flat keys plus 3
+nested ones; median of 200 iterations, including parsing **and** a full walk to extract the
+paths.
 
-## Corrección
+## Correctness
 
-Fixture anidado (`db.host` en línea 2 o 3 según formato). Columnas 0-based.
+Nested fixture (`db.host` on line 2 or 3 depending on the format). Columns are 0-based.
 
-| Formato | Crate | `db.host` | Esperado |
+| Format | Crate | `db.host` | Expected |
 |---|---|---|---|
 | YAML | `saphyr` 0.3.3 | `2:8` | ✅ |
 | TOML | `toml_edit` 0.25.17 | `2:7` | ✅ |
 | JSON | `jsonc-parser` 0.34.0 | `3:12` | ✅ |
 
-## Coste (1000 claves)
+## Cost (1000 keys)
 
-| Medición | µs | µs/clave |
+| Measurement | µs | µs/key |
 |---|---|---|
-| YAML con spans | 562 | 0.56 |
-| YAML sin spans (solo parseo) | 500 | 0.50 |
-| TOML con spans | 570 | 0.57 |
-| TOML sin spans (solo parseo) | 574 | — |
-| JSON con spans | 127 | 0.13 |
+| YAML with spans | 562 | 0.56 |
+| YAML without spans (parse only) | 500 | 0.50 |
+| TOML with spans | 570 | 0.57 |
+| TOML without spans (parse only) | 574 | — |
+| JSON with spans | 127 | 0.13 |
 
-La procedencia cuesta **+12 % en YAML** y es indistinguible del ruido en TOML. Los tres
-formatos quedan muy por debajo del presupuesto de 5 ms por 1000 claves.
+Provenance costs **+12% in YAML** and is indistinguishable from noise in TOML. All three
+formats stay well below the 5 ms budget for 1000 keys.
 
-## Hallazgos
+## Findings
 
-1. **`saphyr` 0.3 ya trae `marked_yaml` dentro.** Expone `MarkedYaml { span, data }`,
-   `Span { start, end }` y `Marker::line()` (1-based) / `col()` (0-based). No hace falta
-   el crate `marked-yaml`, que además arrastra `yaml-rust2` 0.10 y duplicaría el parser.
-2. **`toml_edit`: `DocumentMut` descarta los spans.** Hay que usar `Document`/`ImDocument`
-   y `Item::span()`, que devuelve rangos en **bytes**.
-3. **`jsonc-parser` es el más barato de los tres**: 1 crate en el cierre de dependencias,
-   rangos en bytes y soporte de JSONC (comentarios y comas finales) gratis.
-4. **`jiter` queda descartado**: no expone posiciones. Además su feature `python`
-   arrastra `pyo3` (aparece en `Cargo.lock` aunque no se compile; el gate debe medir con
-   features por defecto, nunca `--all-features`).
-5. **Trampa medida.** Convertir byte → línea/columna recorriendo el fichero desde el
-   inicio en cada clave hace el parseo cuadrático: 5,8 ms en TOML y 6,2 ms en JSON con
-   1000 claves, frente a 0,57 y 0,13 con un índice de líneas y búsqueda binaria.
-   **Regla para el core: un `LineIndex` por fichero, construido una vez.**
-6. **Columnas heterogéneas.** `saphyr` da columna en caracteres; TOML y JSON en bytes.
-   Con UTF-8 multibyte divergen: hay que normalizar a caracteres.
+1. **`saphyr` 0.3 already bundles `marked_yaml`.** It exposes `MarkedYaml { span, data }`,
+   `Span { start, end }` and `Marker::line()` (1-based) / `col()` (0-based). The
+   `marked-yaml` crate is not needed, and it would drag `yaml-rust2` 0.10 and duplicate the
+   parser.
+2. **`toml_edit`: `DocumentMut` drops spans.** `Document`/`ImDocument` must be used, with
+   `Item::span()` returning **byte** ranges.
+3. **`jsonc-parser` is the cheapest of the three**: 1 crate in the dependency closure, byte
+   ranges and JSONC support (comments and trailing commas) for free.
+4. **`jiter` is discarded**: it exposes no positions. Its `python` feature also pulls `pyo3`
+   (it appears in `Cargo.lock` even though it is not compiled; the gate must measure with
+   default features, never `--all-features`).
+5. **Measured trap.** Converting byte → line/column by scanning from the start of the file
+   for every key makes the parse quadratic: 5.8 ms in TOML and 6.2 ms in JSON with 1000
+   keys, against 0.57 and 0.13 with a line index and binary search. **Rule for the core:
+   one `LineIndex` per file, built once.**
+6. **Heterogeneous columns.** `saphyr` reports columns in characters; TOML and JSON in
+   bytes. With multibyte UTF-8 they diverge: they must be normalised to characters.
 
-## Peso de dependencias (cierre completo)
+## Dependency weight (full closure)
 
-| Crate | Crates en el cierre |
+| Crate | Crates in the closure |
 |---|---|
 | `saphyr` | 20 |
 | `toml_edit` | 9 |
 | `jsonc-parser` | 1 |
-| `marked-yaml` (descartado) | 15 |
+| `marked-yaml` (discarded) | 15 |
 
-## Límites de este spike
+## Limits of this spike
 
-- Fixture casi todo ASCII y plano: falta un caso con acentos y emojis para fijar la
-  normalización de columnas.
-- No se midió YAML multi-documento (imports y perfiles) ni documentos de varios MB.
-- Sin perfilado de memoria; solo tiempo.
+- Almost fully ASCII and flat fixture: a case with accents and emoji is still needed to fix
+  the column normalisation.
+- YAML multi-document (imports and profiles) and multi-megabyte documents were not
+  measured.
+- No memory profiling, only time.

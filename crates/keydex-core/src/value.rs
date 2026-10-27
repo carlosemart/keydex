@@ -1,27 +1,27 @@
-//! Valores, posiciones y procedencia.
+//! Values, positions and provenance.
 
 use std::fmt;
 
 use crate::source::Tier;
 
-/// Valor de configuración ya resuelto.
+/// Resolved configuration value.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Value {
-    /// Ausencia explícita (`null`).
+    /// Explicit absence (`null`).
     Null,
-    /// Booleano.
+    /// Boolean.
     Bool(bool),
-    /// Entero de 64 bits.
+    /// 64-bit integer.
     Int(i64),
-    /// Coma flotante.
+    /// Floating point number.
     Float(f64),
-    /// Cadena de texto.
+    /// Text.
     Str(String),
 }
 
 impl Value {
-    /// Devuelve la cadena subyacente, si el valor es textual.
+    /// Returns the underlying string when the value is textual.
     #[must_use]
     pub fn as_str(&self) -> Option<&str> {
         match self {
@@ -30,13 +30,13 @@ impl Value {
         }
     }
 
-    /// `true` si el valor es textual.
+    /// `true` when the value is textual.
     #[must_use]
     pub fn is_str(&self) -> bool {
         matches!(self, Self::Str(_))
     }
 
-    /// Construye un valor textual.
+    /// Builds a textual value.
     #[must_use]
     pub fn str(value: impl Into<String>) -> Self {
         Self::Str(value.into())
@@ -55,29 +55,29 @@ impl fmt::Display for Value {
     }
 }
 
-/// Posición de un valor dentro de un documento.
+/// Position of a value inside a document.
 ///
-/// La columna se expone siempre en **caracteres**, no en bytes: los parsers de TOML y
-/// JSON trabajan con offsets de bytes y se normalizan al construir el span.
+/// The column is always exposed in **characters**, not bytes: the TOML and JSON parsers
+/// work with byte offsets and they are normalised when the span is built.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Span {
-    /// Nombre del fichero tal y como lo declaró la fuente.
+    /// File name as declared by the source.
     pub file: String,
-    /// Línea, 1-based.
+    /// Line, 1-based.
     pub line: u32,
-    /// Columna, 0-based, en caracteres.
+    /// Column, 0-based, in characters.
     pub col: u32,
 }
 
-/// De dónde salió un valor.
+/// Where a value came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Provenance {
-    /// Nombre lógico de la fuente (`file:app.yaml`, `env`).
+    /// Logical source name (`file:app.yaml`, `env`).
     pub source: String,
-    /// Banda de precedencia.
+    /// Precedence band.
     pub tier: Tier,
-    /// Orden de aplicación dentro de la banda.
+    /// Application order inside the band.
     pub order: u32,
-    /// Posición en el documento, si la fuente la conoce.
+    /// Position in the document, when the source knows it.
     pub span: Option<Span>,
 }

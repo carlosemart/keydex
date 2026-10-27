@@ -1,28 +1,28 @@
-# Política de seguridad
+# Security policy
 
-`keydex` maneja configuración que puede contener secretos. Los fallos que nos
-preocupan especialmente son:
+`keydex` handles configuration that may contain secrets. Failures we care about in
+particular:
 
-- fuga de un secreto en `repr`, `str`, logs, mensajes de error, `dump()` o `explain()`;
-- lectura de ficheros arbitrarios provocada por la configuración;
-- ejecución de código a través de la interpolación o de un resolver;
-- corrupción de memoria o `panic` provocado por una entrada hostil.
+- a secret leaking in `repr`, `str`, logs, error messages, `dump()` or `explain()`;
+- arbitrary file reads triggered by configuration;
+- code execution through interpolation or a resolver;
+- memory corruption or a `panic` caused by hostile input.
 
-## Cómo reportar
+## How to report
 
-**No abras un issue público.** Usa
+**Do not open a public issue.** Use
 [GitHub Security Advisories](https://github.com/carlosemart/keydex/security/advisories/new)
-o escribe a `spi101@gmail.com` con el asunto `keydex security`.
+or email `spi101@gmail.com` with the subject `keydex security`.
 
-Incluye: versión, plataforma, entrada mínima que reproduce el problema y el impacto
-que crees que tiene. Si el reporte contiene secretos reales, redáctalos.
+Include: version, platform, a minimal input that reproduces the problem and the impact you
+believe it has. If the report contains real secrets, redact them.
 
-## Compromiso
+## Commitment
 
-- Acuse de recibo en 72 horas.
-- Evaluación y plan en 7 días.
-- Crédito en el aviso si lo deseas.
+- Acknowledgement within 72 hours.
+- Assessment and plan within 7 days.
+- Credit in the advisory if you want it.
 
-## Versiones soportadas
+## Supported versions
 
-Ninguna todavía (pre-alpha). A partir de `0.1.0` se mantendrá la última minor.
+None yet (pre-release). From `0.1.0` onwards the latest minor is supported.

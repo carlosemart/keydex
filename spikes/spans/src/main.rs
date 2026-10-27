@@ -1,15 +1,15 @@
-//! Spike F0: ¿podemos obtener spans (línea/columna) de YAML, TOML y JSON?
+//! Spike F0: can we get spans (line/column) out of YAML, TOML and JSON?
 //!
-//! Mide además el coste de parsear + recorrer 1000 claves por formato, y el coste
-//! añadido de conservar procedencia frente a parsear sin ella.
+//! It also measures the cost of parsing and walking 1000 keys per format, and the extra
+//! cost of keeping provenance versus parsing without it.
 
 use std::time::Instant;
 
 use jsonc_parser::common::Ranged;
 
-/// Índice de inicios de línea: convierte un offset de bytes en (línea, columna)
-/// en O(log n). Sin esto la conversión es O(n) por clave y el parseo se vuelve
-/// cuadrático (medido: 10× más lento con 1000 claves).
+/// Line start index: turns a byte offset into (line, column) in O(log n). Without it the
+/// conversion is O(n) per key and the parse becomes quadratic (measured: 10x slower with
+/// 1000 keys).
 struct LineIndex {
     starts: Vec<usize>,
 }
@@ -68,7 +68,7 @@ fn yaml_walk(node: &saphyr::MarkedYaml, prefix: &str, out: &mut Vec<(String, usi
 
 fn yaml_spans(src: &str) -> Vec<(String, usize, usize)> {
     use saphyr::LoadableYamlNode;
-    let docs = saphyr::MarkedYaml::load_from_str(src).expect("yaml válido");
+    let docs = saphyr::MarkedYaml::load_from_str(src).expect("valid yaml");
     let mut out = Vec::new();
     for doc in &docs {
         yaml_walk(doc, "", &mut out);
@@ -76,7 +76,7 @@ fn yaml_spans(src: &str) -> Vec<(String, usize, usize)> {
     out
 }
 
-/// Baseline: parseo sin spans, sin recorrer el árbol.
+/// Baseline: parsing without spans, without walking the tree.
 fn yaml_plain(src: &str) -> usize {
     use saphyr::LoadableYamlNode;
     saphyr::Yaml::load_from_str(src).map_or(0, |d| d.len())
@@ -116,16 +116,16 @@ fn toml_walk(
 }
 
 fn toml_spans(src: &str) -> Vec<(String, usize, usize)> {
-    let doc: toml_edit::Document<&str> = toml_edit::Document::parse(src).expect("toml válido");
+    let doc: toml_edit::Document<&str> = toml_edit::Document::parse(src).expect("valid toml");
     let idx = LineIndex::new(src);
     let mut out = Vec::new();
     toml_walk(doc.as_table(), "", &idx, &mut out);
     out
 }
 
-/// Baseline: parseo mutable, que descarta spans.
+/// Baseline: mutable parse, which drops spans.
 fn toml_plain(src: &str) -> usize {
-    let doc: toml_edit::DocumentMut = src.parse().expect("toml válido");
+    let doc: toml_edit::DocumentMut = src.parse().expect("valid toml");
     doc.as_table().len()
 }
 
@@ -166,7 +166,7 @@ fn json_walk(
 
 fn json_spans(src: &str) -> Vec<(String, usize, usize)> {
     let res =
-        jsonc_parser::parse_to_ast(src, &Default::default(), &Default::default()).expect("json válido");
+        jsonc_parser::parse_to_ast(src, &Default::default(), &Default::default()).expect("valid json");
     let idx = LineIndex::new(src);
     let mut out = Vec::new();
     if let Some(v) = res.value.as_ref() {
@@ -175,7 +175,7 @@ fn json_spans(src: &str) -> Vec<(String, usize, usize)> {
     out
 }
 
-// ------------------------------------------------------------------- generadores
+// ------------------------------------------------------------------- generators
 
 fn gen_yaml(n: usize) -> String {
     let mut s = String::from("db:\n  host: db.internal\n  port: 5432\n");
@@ -218,7 +218,7 @@ where
 }
 
 fn main() {
-    println!("== corrección de spans (fixture anidado) ==\n");
+    println!("== span correctness (nested fixture) ==\n");
 
     let y = "db:\n  host: db.internal\n  port: 5432\n";
     let t = "[db]\nhost = \"db.internal\"\nport = 5432\n";
@@ -232,15 +232,15 @@ fn main() {
     let iters = 200;
     let (ys, ts, js) = (gen_yaml(n), gen_toml(n), gen_json(n));
 
-    println!("\n== coste: 1000 claves, parseo + recorrido ({} iteraciones) ==\n", iters);
-    println!("{:<22} {:>10} {:>10} {:>10}", "medición", "µs", "claves", "µs/clave");
+    println!("\n== cost: 1000 keys, parse + walk ({} iterations) ==\n", iters);
+    println!("{:<22} {:>10} {:>10} {:>10}", "measurement", "us", "keys", "us/key");
 
     let rows = [
-        ("YAML con spans", bench_us(|s| yaml_spans(s).len(), &ys, iters), n + 3),
-        ("YAML sin spans", bench_us(yaml_plain, &ys, iters), n + 3),
-        ("TOML con spans", bench_us(|s| toml_spans(s).len(), &ts, iters), n + 3),
-        ("TOML sin spans", bench_us(toml_plain, &ts, iters), 1),
-        ("JSON con spans", bench_us(|s| json_spans(s).len(), &js, iters), n + 3),
+        ("YAML with spans", bench_us(|s| yaml_spans(s).len(), &ys, iters), n + 3),
+        ("YAML without spans", bench_us(yaml_plain, &ys, iters), n + 3),
+        ("TOML with spans", bench_us(|s| toml_spans(s).len(), &ts, iters), n + 3),
+        ("TOML without spans", bench_us(toml_plain, &ts, iters), 1),
+        ("JSON with spans", bench_us(|s| json_spans(s).len(), &js, iters), n + 3),
     ];
     for (name, us, keys) in rows {
         println!("{name:<22} {us:>10.1} {keys:>10} {:>10.2}", us / keys as f64);
@@ -249,13 +249,13 @@ fn main() {
     let yaml_sp = rows[0].1;
     let yaml_plain_us = rows[1].1;
     println!(
-        "\ncoste de la procedencia en YAML: +{:.0}% ({:.0} µs → {:.0} µs)",
+        "\nprovenance cost in YAML: +{:.0}% ({:.0} us -> {:.0} us)",
         (yaml_sp / yaml_plain_us - 1.0) * 100.0,
         yaml_plain_us,
         yaml_sp
     );
     println!(
-        "bytes: YAML {} · TOML {} · JSON {}",
+        "bytes: YAML {} | TOML {} | JSON {}",
         ys.len(),
         ts.len(),
         js.len()

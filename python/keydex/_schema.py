@@ -1,8 +1,8 @@
-"""Schema IR: introspección del modelo y materialización del resultado.
+"""Schema IR: model introspection and result materialisation.
 
-Python genera el IR (contrato `keydex.schema/v1`), Rust hace binding, coerción y
-validación, y aquí se reconstruye el dataclass. La conversión de tipos ricos (`Enum`,
-`Path`, `Decimal`, `UUID`) también ocurre en esta capa, no en el motor.
+Python generates the IR (the `keydex.schema/v1` contract), Rust does binding, coercion
+and validation, and this layer rebuilds the dataclass. Rich type conversion (`Enum`,
+`Path`, `Decimal`, `UUID`) also happens here, not in the engine.
 """
 
 from __future__ import annotations
@@ -23,9 +23,9 @@ _CONVERTERS: dict[type, str] = {Path: "path", Decimal: "decimal", UUID: "uuid"}
 
 
 def build_ir(model: type) -> dict:
-    """Construye el IR de un modelo tipado."""
+    """Builds the IR for a typed model."""
     if not dataclasses.is_dataclass(model):
-        raise TypeError(f"se esperaba un dataclass, llegó {model!r}")
+        raise TypeError(f"expected a dataclass, got {model!r}")
     return {"ir": IR_VERSION, "root": _node(model, required=True)}
 
 
@@ -35,7 +35,7 @@ def _node(tp: object, *, required: bool) -> dict:
     if origin in (typing.Union, types.UnionType):
         args = [arg for arg in typing.get_args(tp) if arg is not type(None)]
         if len(args) != 1:
-            raise TypeError(f"unión no soportada: {tp!r}")
+            raise TypeError(f"unsupported union: {tp!r}")
         return {
             "type": "optional",
             "required": False,
@@ -46,7 +46,7 @@ def _node(tp: object, *, required: bool) -> dict:
         args = typing.get_args(tp)
         inner = args[0] if args else str
         if inner is not str:
-            raise TypeError("Secret[T] solo admite str por ahora")
+            raise TypeError("Secret[T] only supports str for now")
         return {"type": "str", "required": required, "converter": "secret"}
 
     if origin in (list, tuple):
@@ -75,11 +75,11 @@ def _node(tp: object, *, required: bool) -> dict:
     if tp in simple:
         return {"type": simple[tp], "required": required}
 
-    raise TypeError(f"tipo no soportado en el esquema: {tp!r}")
+    raise TypeError(f"unsupported schema type: {tp!r}")
 
 
 def build(model: type, tree: dict) -> object:
-    """Reconstruye el modelo a partir del árbol tipado que devuelve el motor."""
+    """Rebuilds the model from the typed tree returned by the engine."""
     hints = typing.get_type_hints(model)
     kwargs = {
         field.name: _convert(hints[field.name], tree[field.name])

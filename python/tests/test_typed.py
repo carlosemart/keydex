@@ -1,4 +1,4 @@
-"""Tests de modelos tipados (F2): coerción, binding relajado y errores agregados."""
+"""Typed model tests (F2): coercion, relaxed binding and aggregated errors."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def write(tmp_path: Path, text: str) -> str:
     return str(path)
 
 
-def test_devuelve_el_modelo_tipado(tmp_path: Path) -> None:
+def test_returns_the_typed_model(tmp_path: Path) -> None:
     cfg = keydex.load(App, files=[write(tmp_path, YAML)], env_prefix="APP_", env={})
 
     assert isinstance(cfg, App)
@@ -55,7 +55,7 @@ def test_devuelve_el_modelo_tipado(tmp_path: Path) -> None:
     assert cfg.tags == ["alpha", "beta"]
 
 
-def test_binding_relajado_sin_doble_guion_bajo(tmp_path: Path) -> None:
+def test_relaxed_binding_without_double_underscore(tmp_path: Path) -> None:
     cfg = keydex.load(
         App,
         files=[write(tmp_path, YAML)],
@@ -66,10 +66,10 @@ def test_binding_relajado_sin_doble_guion_bajo(tmp_path: Path) -> None:
     assert cfg.db.port == 6000
 
 
-def test_defaults_del_dataclass_se_respetan(tmp_path: Path) -> None:
+def test_dataclass_defaults_are_respected(tmp_path: Path) -> None:
     cfg = keydex.load(
         App,
-        files=[write(tmp_path, "" )],
+        files=[write(tmp_path, "")],
         env_prefix="APP_",
         env={"APP_DB_HOST": "h"},
     )
@@ -80,24 +80,24 @@ def test_defaults_del_dataclass_se_respetan(tmp_path: Path) -> None:
     assert cfg.tags == []
 
 
-def test_error_de_validacion_con_rutas(tmp_path: Path) -> None:
+def test_validation_error_with_paths(tmp_path: Path) -> None:
     path = write(tmp_path, YAML)
     with pytest.raises(keydex.ValidationError) as info:
-        keydex.load(App, files=[path], env_prefix="APP_", env={"APP_DB_PORT": "muchos"})
+        keydex.load(App, files=[path], env_prefix="APP_", env={"APP_DB_PORT": "many"})
 
-    rutas = [error["path"] for error in info.value.errors]
-    assert "db.port" in rutas
+    paths = [error["path"] for error in info.value.errors]
+    assert "db.port" in paths
 
 
-def test_campo_requerido_ausente(tmp_path: Path) -> None:
+def test_missing_required_field(tmp_path: Path) -> None:
     with pytest.raises(keydex.ValidationError) as info:
         keydex.load(App, files=[write(tmp_path, "")], env_prefix="APP_", env={})
 
-    rutas = [error["path"] for error in info.value.errors]
-    assert "db.host" in rutas
+    paths = [error["path"] for error in info.value.errors]
+    assert "db.host" in paths
 
 
-def test_booleano_relajado(tmp_path: Path) -> None:
+def test_relaxed_boolean(tmp_path: Path) -> None:
     cfg = keydex.load(
         App,
         files=[write(tmp_path, "db:\n  host: h\n")],
@@ -119,7 +119,7 @@ class WithRich:
     data_dir: Path
 
 
-def test_enum_y_path(tmp_path: Path) -> None:
+def test_enum_and_path(tmp_path: Path) -> None:
     cfg = keydex.load(
         WithRich,
         files=[write(tmp_path, "mode: slow\ndata_dir: /var/lib/keydex\n")],
@@ -130,7 +130,7 @@ def test_enum_y_path(tmp_path: Path) -> None:
     assert cfg.data_dir == Path("/var/lib/keydex")
 
 
-def test_interpolacion_llega_al_modelo(tmp_path: Path) -> None:
+def test_interpolation_reaches_the_model(tmp_path: Path) -> None:
     @dataclass(frozen=True)
     class Url:
         host: str
@@ -146,19 +146,19 @@ def test_interpolacion_llega_al_modelo(tmp_path: Path) -> None:
     assert cfg.url == "h:5432"
 
 
-def test_avisa_de_las_claves_desconocidas(tmp_path: Path) -> None:
+def test_warns_about_unknown_keys(tmp_path: Path) -> None:
     path = write(tmp_path, "db:\n  host: h\n  prot: 1\n")
     with pytest.warns(keydex.UnknownKeyWarning, match="db.prot"):
         keydex.load(App, files=[path], env_prefix="APP_", env={})
 
 
-def test_sugiere_la_clave_parecida(tmp_path: Path) -> None:
+def test_suggests_the_closest_key(tmp_path: Path) -> None:
     path = write(tmp_path, "db:\n  host: h\n  prot: 1\n")
     with pytest.warns(keydex.UnknownKeyWarning, match="db.port"):
         keydex.load(App, files=[path], env_prefix="APP_", env={})
 
 
-def test_on_unknown_error_convierte_el_aviso_en_error(tmp_path: Path) -> None:
+def test_on_unknown_error_turns_the_warning_into_an_error(tmp_path: Path) -> None:
     path = write(tmp_path, "db:\n  host: h\n  prot: 1\n")
     with pytest.raises(keydex.ValidationError) as info:
         keydex.load(App, files=[path], env_prefix="APP_", env={}, on_unknown="error")
@@ -166,7 +166,7 @@ def test_on_unknown_error_convierte_el_aviso_en_error(tmp_path: Path) -> None:
     assert any(error["path"] == "db.prot" for error in info.value.errors)
 
 
-def test_on_unknown_ignore_no_avisa(tmp_path: Path) -> None:
+def test_on_unknown_ignore_does_not_warn(tmp_path: Path) -> None:
     import warnings
 
     path = write(tmp_path, "db:\n  host: h\n  prot: 1\n")

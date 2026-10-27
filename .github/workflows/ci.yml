@@ -66,6 +66,6 @@ jobs:
       - run: uv venv .venv-ft --python 3.14t
       - run: maturin build --release --no-default-features --interpreter .venv-ft/bin/python --out dist-ft
       - run: uv pip install --python .venv-ft/bin/python dist-ft/*.whl pytest
-      - name: El GIL debe seguir desactivado
-        run: .venv-ft/bin/python -c "import sys, keydex; assert not sys._is_gil_enabled(), 'el módulo fuerza el GIL'"
+      - name: The GIL must stay disabled
+        run: .venv-ft/bin/python -c "import sys, keydex; assert not sys._is_gil_enabled(), 'the module forces the GIL'"
       - run: .venv-ft/bin/python -m pytest python/tests examples/homelab-demo/tests -q
