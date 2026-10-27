@@ -209,7 +209,7 @@ runtime. *Planned: explicit validation of the IR.*
 nested dataclasses, `Enum`, `Path`, `Decimal`, `UUID`, `Secret[T]`.
 
 **Planned:** `datetime`/`date`/`time`, `IPv4Address`/`IPv6Address`, `duration`, `size`,
-`rate`, `URL`, discriminated `Union`, `Literal`, `tuple`, `set`, `dict[str, T]`, `attrs`,
+`rate`, `URL`, discriminated `Union`, `Literal`, `tuple`, `set`, `attrs`,
 `pydantic` (through JSON Schema), `msgspec.Struct`, `TypedDict`, `NamedTuple`.
 
 ### 7.2 Coercion rules
