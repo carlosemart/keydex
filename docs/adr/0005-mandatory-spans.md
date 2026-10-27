@@ -1,6 +1,6 @@
 # 0005 — Parsers must preserve spans
 
-- Status: accepted
+- Status: accepted; the JSON part is superseded by [0006](0006-parsers-with-spans.md)
 - Date: 2026-10-27
 
 ## Context

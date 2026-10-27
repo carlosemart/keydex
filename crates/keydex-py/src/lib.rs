@@ -40,6 +40,7 @@ struct Spec {
 #[pyclass(name = "Settings", module = "keydex", frozen)]
 struct PySettings {
     spec: Spec,
+    sensitive: Vec<String>,
     inner: Arc<RwLock<Arc<Snapshot>>>,
 }
 
@@ -49,6 +50,11 @@ impl PySettings {
             .read()
             .map(|guard| Arc::clone(&guard))
             .map_err(|_| KeydexError::new_err("internal state poisoned"))
+    }
+
+    /// `true` when the key must be hidden from diagnostic output.
+    fn redacts(&self, key: &str) -> bool {
+        self.sensitive.iter().any(|candidate| candidate == key)
     }
 }
 
@@ -85,18 +91,30 @@ impl PySettings {
     }
 
     /// `(key, value)` pairs in lexicographic order.
+    ///
+    /// Sensitive keys are returned as `None`: use `get()` when you need the value.
     fn items(&self, py: Python<'_>) -> PyResult<Vec<(String, Py<PyAny>)>> {
         let snapshot = self.snapshot()?;
         snapshot
             .iter()
-            .map(|(key, value)| Ok((key.to_string(), to_py(py, value)?)))
+            .map(|(key, value)| {
+                let item = if self.redacts(key) {
+                    py.None()
+                } else {
+                    to_py(py, value)?
+                };
+                Ok((key.to_string(), item))
+            })
             .collect()
     }
 
     /// Provenance of a key, or `None` when it does not exist.
-    fn explain(&self, py: Python<'_>, key: &str) -> PyResult<Py<PyAny>> {
+    ///
+    /// Sensitive keys report `value: None` and `redacted: true` unless `reveal` is set.
+    #[pyo3(signature = (key, reveal = false))]
+    fn explain(&self, py: Python<'_>, key: &str, reveal: bool) -> PyResult<Py<PyAny>> {
         match self.snapshot()?.explain(key) {
-            Some(explanation) => explanation_to_py(py, &explanation),
+            Some(explanation) => explanation_to_py(py, &explanation, self.redacts(key) && !reveal),
             None => Ok(py.None()),
         }
     }
@@ -121,13 +139,16 @@ impl PySettings {
 }
 
 #[pyfunction]
-#[pyo3(signature = (files, env_prefix = "", env = None, profiles = Vec::new()))]
+#[pyo3(signature = (files, env_prefix = "", env = None, profiles = Vec::new(), sensitive = Vec::new()))]
 /// Loads one or several files and applies environment variables and profiles.
+///
+/// `sensitive` lists the keys that must be hidden from `explain`, `items` and `dump`.
 fn load(
     files: Vec<String>,
     env_prefix: &str,
     env: Option<HashMap<String, String>>,
     profiles: Vec<String>,
+    sensitive: Vec<String>,
 ) -> PyResult<PySettings> {
     let spec = Spec {
         files,
@@ -141,6 +162,7 @@ fn load(
     let snapshot = build_snapshot(&spec)?;
     Ok(PySettings {
         spec,
+        sensitive,
         inner: Arc::new(RwLock::new(Arc::new(snapshot))),
     })
 }
@@ -348,10 +370,20 @@ fn provenance_to_py(py: Python<'_>, provenance: &Provenance) -> PyResult<Py<PyAn
     Ok(dict.into_any().unbind())
 }
 
-fn explanation_to_py(py: Python<'_>, explanation: &Explanation) -> PyResult<Py<PyAny>> {
+fn explanation_to_py(
+    py: Python<'_>,
+    explanation: &Explanation,
+    redact: bool,
+) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("key", &explanation.key)?;
-    dict.set_item("value", to_py(py, &explanation.value)?)?;
+    if redact {
+        dict.set_item("value", py.None())?;
+        dict.set_item("redacted", true)?;
+    } else {
+        dict.set_item("value", to_py(py, &explanation.value)?)?;
+        dict.set_item("redacted", false)?;
+    }
     dict.set_item("winner", provenance_to_py(py, &explanation.winner)?)?;
     let shadowed: Vec<Py<PyAny>> = explanation
         .shadowed

@@ -11,9 +11,9 @@ surface.
 
 ## Decision
 
-Interpolation supports only references (`${a.b}`, `${.sibling}`, `${..parent}`), a default
-value (`${a:-x}`) and registered pure resolvers (`${env:VAR}`). No arithmetic, no
-conditionals, no method access, no `eval`.
+Interpolation supports only references (`${a.b}`, and in the planned future the relative
+forms `${.sibling}` and `${..parent}`), a default value (`${a:-x}`) and registered pure
+resolvers (`${env:VAR}`). No arithmetic, no conditionals, no method access, no `eval`.
 
 ## Consequences
 

@@ -49,6 +49,9 @@ raw.explain("db.host")
 
 `APP_DB_HOST` matches `db.host` without needing `__`: the schema disambiguates.
 
+Precedence, as implemented: **environment (2) > profile file (3) > base file (4) > code
+defaults (6)**. The other bands in the specification are design, not code.
+
 Errors are aggregated instead of failing on the first one:
 
 ```python
@@ -106,12 +109,19 @@ cfg.db.password            # Secret('***')
 cfg.db.password.reveal()   # the real value
 ```
 
-`repr`, `str` and any log of the dataclass show `***`. Docker/K8s indirection is also
-supported:
+`repr`, `str` and any log of the dataclass show `***`. Docker/K8s indirection is opt-in
+and confined to a directory you choose:
 
 ```bash
 APP_DB__PASSWORD_FILE=/run/secrets/db_password
 ```
+
+```python
+keydex.load(App, files=["app.yaml"], secret_files=True, secret_root="/run/secrets")
+```
+
+Without `secret_files=True` no file is read; a path outside `secret_root` raises
+`KeydexError`.
 
 ## Reload
 
@@ -130,10 +140,15 @@ python -m keydex dump --files config/app.yaml
 ## Why
 
 ```python
-cfg = keydex.load(AppConfig, profiles=["prod"])
+cfg = keydex.load(App, files=["config/app.yaml"], profiles=["prod"])
 cfg.db.host                 # right value, right type, no FFI per access
-cfg.explain("db.host")      # where it comes from, who shadowed it, what it used
+
+raw = keydex.load_settings(files=["config/app.yaml"], profiles=["prod"])
+raw.explain("db.host")      # where it comes from, who shadowed it, what it used
 ```
+
+Provenance lives in `Settings` (dictionary mode), not in the typed model: `load` returns
+your dataclass. The two calls build the same snapshot from the same sources.
 
 What it adds over `dynaconf`, `omegaconf` or `pydantic-settings`:
 

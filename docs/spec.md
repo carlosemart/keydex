@@ -100,15 +100,19 @@ Rules that are not negotiable; they are cheap now and very expensive later.
 Bands from highest to lowest priority. Inside a band, ascending `order`; the last one
 applied wins.
 
-| Band | Origin | Notes |
-|---|---|---|
-| 0 | Test / programmatic overrides | `env.override()`, pytest fixture |
-| 1 | Mapped CLI arguments | `--db-host=x` → `db.host` |
-| 2 | OS environment variables | `APP_` prefix, `*_FILE` for secrets |
-| 3 | Files of the active profile | the last profile wins; the last document wins |
-| 4 | Base files | the last location wins |
-| 5 | Schema defaults | `???` = required and absent (a sentinel, not `None`) |
-| 6 | Code defaults | declared in the model |
+| Band | Origin | Status | Notes |
+|---|---|---|---|
+| 0 | Test / programmatic overrides | Planned | `env.override()`, pytest fixture |
+| 1 | Mapped CLI arguments | Planned | `--db-host=x` → `db.host` |
+| 2 | OS environment variables | Implemented | `APP_` prefix, `*_FILE` for secrets |
+| 3 | Files of the active profile | Implemented | the last profile wins |
+| 4 | Base files | Implemented | the last location wins |
+| 5 | Schema defaults | Not implemented | `???` = required and absent (a sentinel, not `None`) |
+| 6 | Code defaults | Via Python | declared in the dataclass |
+
+Only three bands exist in the engine today. The Python layer adds an environment source
+(band 2) and base/profile documents (bands 4 and 3); defaults come from the dataclass, not
+from the engine.
 
 Additional rules:
 
@@ -147,9 +151,10 @@ exposes them. That drives the dependency choice (§17.3).
 
 - Configurable prefix (`env_prefix="APP_"`), stripped and lowercased. **Implemented.**
 - Syntax: see §6.
-- `*_FILE`: if `APP_DB_PASSWORD_FILE` exists, the value is read from the file and never
-  mixed with `APP_DB_PASSWORD`. Implemented in the Python layer, not in the core, so the
-  engine stays free of filesystem access. **Implemented.**
+- `*_FILE`: if `APP_DB_PASSWORD_FILE` exists **and `secret_files=True`**, the value is
+  read from the file, must live under `secret_root`, and the derived key is marked
+  sensitive. Off by default: without opting in, `*_FILE` variables are inert and no file is
+  read. **Implemented.**
 
 ### 5.4 Other sources
 
@@ -209,18 +214,18 @@ dataclasses, `Enum`, `Path`, `Decimal`, `UUID`, `Secret[T]`.
 
 ### 7.2 Coercion rules
 
-| Type | Accepts (`relaxed` mode) |
-|---|---|
-| `bool` | `true/false`, `yes/no`, `on/off`, `1/0` (case-insensitive) |
-| `int` | `42`, `"42"` |
-| `float` | `3.14`, `"3.14"`, integers |
-| `Enum` | name or value, case-insensitive in relaxed mode |
-| `Path` | `str`; `~` is **not** expanded |
-| `Decimal` | exact `str`, never `float` |
-| `datetime` | ISO-8601; naive → error in strict mode. *Planned.* |
-| `duration` | `250ms`, `5s`, `3m`, `2h`, `1d`, `PT5M`. *Planned.* |
-| `size` | `10MB`, `1GiB` (binary vs decimal explicit). *Planned.* |
-| `rate` | `100/s`, `5MB/s`. *Planned.* |
+| Type | Accepts (`relaxed` mode) | Caveat |
+|---|---|---|
+| `bool` | `true/false`, `yes/no`, `on/off`, `"1"/"0"` as **text** | A YAML/TOML/JSON integer `1` is rejected, not coerced |
+| `int` | `42`, `"42"` | |
+| `float` | `3.14`, `"3.14"`, integers | |
+| `Enum` | exact member value | Case-insensitive matching is **not** implemented; an invalid value raises `ValueError` from Python, not `ValidationError` |
+| `Path` | `str`; `~` is **not** expanded | |
+| `Decimal` | exact `str` | Sourced from a YAML/JSON number it goes through the text form and can lose precision (`1.10` → `1.1`) |
+| `datetime` | ISO-8601 | *Planned* |
+| `duration` | `250ms`, `5s`, `3m`, `2h`, `1d`, `PT5M` | *Planned* |
+| `size` | `10MB`, `1GiB` (binary vs decimal explicit) | *Planned* |
+| `rate` | `100/s`, `5MB/s` | *Planned* |
 
 Modes: `strict` (lossless conversions only), `relaxed` (default, table above), `lenient`
 (best effort). **Never** `"false"` → `True`, never a lossy float → int, never silent string
@@ -399,6 +404,7 @@ cfg.explain("db.host")
 # {
 #   "key": "db.host",
 #   "value": "db.internal",
+#   "redacted": False,
 #   "winner":   {"source": "env", "tier": 2, "file": None, "line": None, "col": None},
 #   "shadowed": [{"source": "file:app.yaml", "tier": 4,
 #                 "file": "app.yaml", "line": 4, "col": 8}],
@@ -409,11 +415,16 @@ cfg.explain("db.host")
 Rules:
 
 - `shadowed` includes **every** origin that defined the key and lost, oldest first.
-- Redaction for secrets is enforced by the `Secret` type on the Python side, not by
-  `explain` (there is no schema at that point). *Planned: `redacted` flag and `reveal`
-  parameter.*
-- `dump` is deterministic. The CLI prints JSON in key order.
-- CLI equivalent: `python -m keydex explain db.host`.
+- **Redaction depends on the caller.** A key declared `sensitive` (via `sensitive=[...]`
+  or derived from `*_FILE`) is returned with `value: None` and `redacted: True`;
+  `reveal=True` shows it. Keys not declared sensitive are returned in the clear: in
+  dictionary mode there is no schema to know which values are secret. `get()` and `[]`
+  always return the raw value.
+- `dump` is deterministic and uses `items()`, which applies the same redaction.
+- `explain` exists on `Settings` (dictionary mode). A typed model is a plain dataclass and
+  has no provenance; load with `load_settings` when you need it.
+- CLI equivalent: `python -m keydex explain db.host` (add `--reveal` to see sensitive
+  values).
 
 ---
 
@@ -584,10 +595,10 @@ cached resolution which is implemented.
 
 ### 19.1 Wheels
 
-| Artifact | Covers |
-|---|---|
-| `abi3-py311` | 3.11, 3.12, 3.13, 3.14, 3.15 (with the GIL) |
-| `cp314t` | 3.14 free-threaded, `gil_used = false` |
+| Artifact | Covers | Status |
+|---|---|---|
+| `abi3-py311` | 3.11, 3.12, 3.13, 3.14, 3.15 (with the GIL) | published |
+| `cp314t` | 3.14 free-threaded, `gil_used = false` | built and tested in CI, **not published** until reads are lock-free |
 
 `abi3` and `t` are mutually exclusive today (PEP 803 `abi3t` does not exist yet): two build
 profiles with maturin.
@@ -693,16 +704,16 @@ There is also `crates/keydex-core/AGENTS.md`, loaded when working inside that su
 
 | Rule | Verifiable mechanism |
 |---|---|
-| core without pyo3 | `./scripts/gate.sh`: `cargo tree -p keydex-core` contains no `pyo3` |
-| core without env/clock/FS | `clippy.toml` with `disallowed-methods` (`std::env::*`, `SystemTime::now`, `std::fs::*`) + `deny(clippy::disallowed_methods)` |
-| structured errors | `deny(panic, unwrap_used, expect_used)` in the core |
-| no global state | `forbid(static_mut_refs)` + review; caches behind `RwLock`/`OnceLock` |
-| zero FFI per access | benchmark gate: access ±10% vs a native dataclass |
-| spans in `explain` | golden test with `line != null` |
-| banned dependencies | `cargo deny` with `bans` for `serde_yaml` |
-| determinism | test that shuffles `os.environ` and compares `dump()` byte for byte |
-| no secret leaks | dedicated suite per output surface (`repr`, `dump`, `explain`, errors) |
-| no push to `main` | branch protection: PR required, five checks required, force-push blocked |
+| core without pyo3 | `./scripts/gate.sh` (pattern `^pyo3( |$)`) plus `--self-test`, which proves the gate fires on a violation |
+| core without env/clock/FS | `clippy.toml` blocks **seven specific methods** (`std::env::{var,var_os,vars,vars_os}`, `SystemTime::now`, `std::fs::{read,read_to_string}`), not the whole namespaces; anything else is reviewed |
+| structured errors | `deny(panic, unwrap_used, expect_used)` in the core; `ValidationError` still carries a `String` message |
+| no global state | `forbid(static_mut_refs)` plus review; the only shared state is the `RwLock` in the binding |
+| zero FFI per access | **not enforced yet**: no benchmark gate exists |
+| spans in `explain` | golden tests in `crates/keydex-core/tests/snapshot.rs` assert file, line and column |
+| banned dependencies | `gate.sh` and `cargo deny` in CI |
+| determinism | test compares key order across two builds; a shuffled-environment test is still planned |
+| no secret leaks | tests cover `repr` and the redaction of declared sensitive keys in `explain`/`items`; `get()` returns raw values by design |
+| no push to `main` | branch protection: PR required, six checks required, force-push blocked |
 
 ### 24.2 Rules for `AGENTS.md` itself
 
@@ -812,10 +823,10 @@ The IR survives several package versions. That is what keeps an old `dump` reada
 ### 26.6 Release flow
 
 1. Conventional commits on a feature branch; `main` is protected.
-2. Pull request with the five checks green.
+2. Pull request with the six checks green.
 3. Merge → tag `vX.Y.Z`.
-4. CI publishes `keydex-core` to crates.io **first** and then the wheels to PyPI (order
-   matters: `keydex-py` depends on the core by version).
+4. CI publishes `keydex-core` to crates.io and the sdist plus wheels to PyPI. The order is
+   not significant: the wheel is built from source, not from crates.io.
 
 > Name reservation and publication are real actions and are performed by the user, not by
 > the agent.

@@ -14,6 +14,22 @@ def _common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--files", nargs="+", default=[], help="configuration files")
     parser.add_argument("--env-prefix", default="", help="environment variable prefix")
     parser.add_argument("--profiles", nargs="*", default=[], help="active profiles")
+    parser.add_argument(
+        "--secret-files",
+        action="store_true",
+        help="resolve *_FILE variables by reading the referenced files",
+    )
+    parser.add_argument(
+        "--secret-root",
+        default=None,
+        help="directory that resolved *_FILE paths must stay inside",
+    )
+    parser.add_argument(
+        "--sensitive",
+        nargs="*",
+        default=[],
+        help="keys hidden from the output (for example db.password)",
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -22,6 +38,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     explain = sub.add_parser("explain", help="shows the provenance of a key")
     explain.add_argument("key")
+    explain.add_argument(
+        "--reveal", action="store_true", help="show sensitive values in the clear"
+    )
     _common(explain)
 
     dump = sub.add_parser("dump", help="dumps the resolved configuration as JSON")
@@ -34,13 +53,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             files=args.files,
             env_prefix=args.env_prefix,
             profiles=args.profiles,
+            sensitive=args.sensitive,
+            secret_files=args.secret_files,
+            secret_root=args.secret_root,
         )
     except keydex.KeydexError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
 
     if args.command == "explain":
-        explanation = settings.explain(args.key)
+        explanation = settings.explain(args.key, reveal=args.reveal)
         if explanation is None:
             print(f"unknown key: {args.key}", file=sys.stderr)
             return 2

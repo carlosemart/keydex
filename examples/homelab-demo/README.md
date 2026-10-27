@@ -52,11 +52,13 @@ python examples/homelab-demo/src/main.py --profiles prod --explain db.host
 
 ```bash
 APP_DB__HOST=override.local python examples/homelab-demo/src/main.py --profiles prod
-APP_DB__PASSWORD_FILE=/run/secrets/db python examples/homelab-demo/src/main.py --profiles prod
+APP_SECRET_ROOT=/run/secrets APP_DB__PASSWORD_FILE=/run/secrets/db \
+  python examples/homelab-demo/src/main.py --profiles prod
 ```
 
-If the secret file does not exist, startup fails with an explicit error instead of
-starting with an empty password.
+Reading from a file is opt-in: the demo enables it only when `APP_SECRET_ROOT` is set, and
+a path outside that directory is rejected. If the file does not exist, startup fails with
+an explicit error instead of starting with an empty password.
 
 ## Invalid configuration
 

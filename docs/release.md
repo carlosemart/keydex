@@ -16,7 +16,8 @@ Two things only the account owner can do:
 
 ```bash
 # 1. Bump the version in Cargo.toml (workspace) and add a CHANGELOG.md entry
-# 2. Commit and push to main
+# 2. Open a pull request with the six CI checks green and merge it
+# 3. Tag the merge commit and push the tag
 git tag -a v0.1.0 -m "0.1.0"
 git push origin v0.1.0
 ```
@@ -27,9 +28,12 @@ The tag triggers `.github/workflows/release.yml`:
 |---|---|
 | `sdist` | source tarball |
 | `wheels` | `cp311-abi3` for x86_64 and aarch64, manylinux 2.28 |
-| `wheels-freethreaded` | `cp314t` (without `abi3`, with `gil_used = false`) |
-| `publish-pypi` | uploads everything to PyPI |
+| `publish-pypi` | uploads the sdist and the wheels to PyPI |
 | `publish-crates` | publishes `keydex-core` |
+
+The free-threaded wheel (`cp314t`) is built and tested in CI but **not published yet**:
+every access takes an `RwLock`, which defeats the point of free-threading. It ships once
+the read path is lock-free.
 
 ## Why two builds
 

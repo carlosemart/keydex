@@ -95,8 +95,52 @@ def test_file_indirection_for_secrets(tmp_path: Path) -> None:
         files=[write(tmp_path, "app.yaml", "db:\n  user: u\n")],
         env_prefix="APP_",
         env={"APP_DB__PASSWORD_FILE": str(reference)},
+        secret_files=True,
+        secret_root=str(tmp_path),
     )
     assert cfg.db.password.reveal() == "from-file"
+
+
+def test_file_indirection_is_off_by_default(tmp_path: Path) -> None:
+    # Without opting in, `*_FILE` is inert: no file is read.
+    cfg = keydex.load(
+        App,
+        files=[write(tmp_path, "app.yaml", "db:\n  user: u\n  password: literal\n")],
+        env_prefix="APP_",
+        env={"APP_DB__PASSWORD_FILE": "/etc/hostname"},
+    )
+    assert cfg.db.password.reveal() == "literal"
+
+
+def test_file_indirection_requires_a_root(tmp_path: Path) -> None:
+    reference = tmp_path / "password"
+    reference.write_text("x", encoding="utf-8")
+
+    with pytest.raises(keydex.KeydexError):
+        keydex.load(
+            App,
+            files=[write(tmp_path, "app.yaml", "db:\n  user: u\n")],
+            env_prefix="APP_",
+            env={"APP_DB__PASSWORD_FILE": str(reference)},
+            secret_files=True,
+        )
+
+
+def test_a_file_outside_the_root_is_rejected(tmp_path: Path) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    outside = tmp_path / "outside"
+    outside.write_text("nope", encoding="utf-8")
+
+    with pytest.raises(keydex.KeydexError):
+        keydex.load(
+            App,
+            files=[write(tmp_path, "app.yaml", "db:\n  user: u\n")],
+            env_prefix="APP_",
+            env={"APP_DB__PASSWORD_FILE": str(outside)},
+            secret_files=True,
+            secret_root=str(allowed),
+        )
 
 
 def test_missing_file_reference_is_an_error(tmp_path: Path) -> None:
@@ -106,7 +150,30 @@ def test_missing_file_reference_is_an_error(tmp_path: Path) -> None:
             files=[write(tmp_path, "app.yaml", "db:\n  user: u\n")],
             env_prefix="APP_",
             env={"APP_DB__PASSWORD_FILE": str(tmp_path / "does-not-exist")},
+            secret_files=True,
+            secret_root=str(tmp_path),
         )
+
+
+def test_explain_and_items_redact_file_backed_secrets(tmp_path: Path) -> None:
+    reference = tmp_path / "password"
+    reference.write_text("s3cr3t", encoding="utf-8")
+
+    settings = keydex.load_settings(
+        files=[write(tmp_path, "app.yaml", "db:\n  user: u\n")],
+        env_prefix="APP_",
+        env={"APP_DB__PASSWORD_FILE": str(reference)},
+        secret_files=True,
+        secret_root=str(tmp_path),
+    )
+
+    redacted = settings.explain("db.password")
+    assert redacted["value"] is None
+    assert redacted["redacted"] is True
+    assert "s3cr3t" not in repr(dict(settings.items()))
+    assert settings.get("db.password") == "s3cr3t"
+
+    assert settings.explain("db.password", reveal=True)["value"] == "s3cr3t"
 
 
 def test_refresh_re_reads_the_sources(tmp_path: Path) -> None:

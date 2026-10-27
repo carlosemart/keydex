@@ -1,12 +1,29 @@
 # Security policy
 
-`keydex` handles configuration that may contain secrets. Failures we care about in
-particular:
+`keydex` handles configuration that may contain secrets.
 
-- a secret leaking in `repr`, `str`, logs, error messages, `dump()` or `explain()`;
-- arbitrary file reads triggered by configuration;
-- code execution through interpolation or a resolver;
-- memory corruption or a `panic` caused by hostile input.
+## What is protected
+
+- **`Secret[T]`** in typed models: `repr`, `str` and dataclass printing show
+  `Secret('***')`. The value only leaves through `.reveal()`.
+- **Diagnostic output**: `Settings.explain()` and `Settings.items()` return `None` for
+  keys declared sensitive, and mark the explanation with `redacted: true`. `dump` and
+  `python -m keydex dump` use `items()`, so they inherit that.
+- **Keys derived from `*_FILE`** are marked sensitive automatically.
+- **`*_FILE` is opt-in**: it only resolves when `secret_files=True`, and every resolved
+  path must live inside the directory passed as `secret_root`; anything else raises
+  `KeydexError`. Without opting in, no file is ever read.
+
+## What is not protected
+
+- `Settings.get(key)` and `Settings["key"]` return the **raw** value. That is the point of
+  the API; do not log their result.
+- In dictionary mode, a key is only redacted if it is declared sensitive, either through
+  the `sensitive=[...]` argument or because it came from `*_FILE`. There is no guessing by
+  key name.
+- The Rust `Snapshot` derives `Debug`, so `{:?}` on it prints raw values.
+- Values already copied into a Python object (a plain `str` field, a log message, an
+  exception message) are outside the library's control.
 
 ## How to report
 

@@ -32,11 +32,14 @@ def split_profiles(raw: str) -> list[str]:
 
 
 def load(profiles: list[str]) -> App:
+    secret_root = os.environ.get("APP_SECRET_ROOT")
     return keydex.load(
         App,
         files=[str(CONFIG_DIR / "app.yaml")],
         env_prefix="APP_",
         profiles=profiles,
+        secret_files=secret_root is not None,
+        secret_root=secret_root,
     )
 
 
@@ -68,10 +71,13 @@ def main(argv: list[str] | None = None) -> int:
     profiles = split_profiles(args.profiles)
 
     if args.explain:
+        secret_root = os.environ.get("APP_SECRET_ROOT")
         settings = keydex.load_settings(
             files=[str(CONFIG_DIR / "app.yaml")],
             env_prefix="APP_",
             profiles=profiles,
+            secret_files=secret_root is not None,
+            secret_root=secret_root,
         )
         explanation = settings.explain(args.explain)
         if explanation is None:

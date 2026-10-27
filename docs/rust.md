@@ -3,9 +3,15 @@
 `keydex-core` is the engine on its own: span-preserving parsers, precedence, merge,
 interpolation, coercion and provenance. It knows nothing about Python.
 
-```bash
-cargo add keydex-core
+`keydex-core` 0.1.0 is **not published yet** (only the 0.0.1 name reservation exists on
+crates.io), so depend on the repository for now:
+
+```toml
+[dependencies]
+keydex-core = { git = "https://github.com/carlosemart/keydex", branch = "main" }
 ```
+
+Once 0.1.0 is on crates.io it becomes `cargo add keydex-core`.
 
 ## The two rules that shape the API
 
@@ -16,59 +22,87 @@ cargo add keydex-core
 
 ## Dictionary mode
 
+This is a complete program (`cargo run -p keydex-core --example basic` runs it):
+
 ```rust
 use std::collections::BTreeMap;
 use keydex_core::{Builder, Format, Tier};
 
-let environment: BTreeMap<String, String> = std::iter::once((
-    String::from("APP_DB__HOST"),
-    String::from("env.internal"),
-))
-.collect();
+const APP_YAML: &str = "\
+db:
+  host: file.internal
+  port: 5432
+  url: \"postgres://${db.host}:${db.port}/app\"
+";
 
-let mut builder = Builder::new().with_env(environment);
-builder.env_source("APP_", Tier::Environment);
-builder.document("app.yaml", yaml_source, Format::Yaml, Tier::BaseFile)?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let environment: BTreeMap<String, String> = std::iter::once((
+        String::from("APP_DB__HOST"),
+        String::from("env.internal"),
+    ))
+    .collect();
 
-let snapshot = builder.build()?;
+    let mut builder = Builder::new().with_env(environment);
+    builder.env_source("APP_", Tier::Environment);
+    builder.document("app.yaml", APP_YAML, Format::Yaml, Tier::BaseFile)?;
 
-snapshot.get("db.host");          // Option<&Value>
-snapshot.iter();                  // ("key", &Value) in key order
-snapshot.keys_with_prefix("db."); // for rebuilding lists
+    let snapshot = builder.build()?;
+
+    println!("{}", snapshot.get("db.url").unwrap());   // env.internal:5432
+    for (key, value) in snapshot.iter() {
+        println!("{key} = {value}");
+    }
+
+    Ok(())
+}
 ```
 
 `env_source` uses dictionary-mode rules: `__` separates levels and `_` is literal. `Tier`
 decides precedence; see [the specification](spec.md#4-precedence).
 
-A complete program: [`examples/basic.rs`](https://github.com/carlosemart/keydex/blob/main/crates/keydex-core/examples/basic.rs)
-(`cargo run -p keydex-core --example basic`).
-
 ## Schema mode
 
-When you have a model, the IR lets the engine do binding, coercion and validation:
+This is a complete program (`cargo run -p keydex-core --example schema` runs it):
 
 ```rust
-use keydex_core::{Builder, Schema, Tier, coerce, unknown_keys};
+use std::collections::BTreeMap;
+use keydex_core::{Builder, Format, Schema, Tier, coerce};
 
-let schema = Schema::from_json(SCHEMA_JSON)?;
+const APP_YAML: &str = "db:\n  host: db.internal\n  port: 5432\n";
 
-let mut builder = Builder::new().with_env(environment);
-builder.schema_env_source(&schema, "APP_", Tier::Environment)?;
-builder.document("app.yaml", yaml_source, Format::Yaml, Tier::BaseFile)?;
-let snapshot = builder.build()?;
+// What the Python layer generates for a dataclass; hand-written here for the example.
+const SCHEMA: &str = r#"{
+  "ir": "keydex.schema/v1",
+  "root": {"type":"struct","required":true,"fields":{
+    "db": {"type":"struct","required":true,"fields":{
+      "host": {"type":"str","required":true},
+      "port": {"type":"int","required":false}
+    }}
+  }}
+}"#;
 
-let tree: serde_json::Value = match coerce(&snapshot, &schema) {
-    Ok(tree) => tree,
-    Err(errors) => {
-        for error in &errors {
-            eprintln!("{}: {}", error.path, error.message);
-        }
-        return Ok(());
-    }
-};
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let schema = Schema::from_json(SCHEMA)?;
 
-for key in unknown_keys(&snapshot, &schema) {
-    eprintln!("unused key {} (suggestion: {:?})", key.path, key.suggestion);
+    let environment: BTreeMap<String, String> =
+        std::iter::once((String::from("APP_DB_HOST"), String::from("env.internal")))
+            .collect();
+
+    let mut builder = Builder::new().with_env(environment);
+    builder.schema_env_source(&schema, "APP_", Tier::Environment)?;
+    builder.document("app.yaml", APP_YAML, Format::Yaml, Tier::BaseFile)?;
+
+    let snapshot = builder.build()?;
+    let tree = coerce(&snapshot, &schema).map_err(|errors| {
+        errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("; ")
+    })?;
+
+    println!("{tree:#}");
+    Ok(())
 }
 ```
 
@@ -80,9 +114,6 @@ Differences from dictionary mode:
 - Fields that are missing and not required are omitted from the tree, so the caller applies
   its own defaults.
 
-A complete program: [`examples/schema.rs`](https://github.com/carlosemart/keydex/blob/main/crates/keydex-core/examples/schema.rs)
-(`cargo run -p keydex-core --example schema`).
-
 The IR is a versioned contract (`keydex.schema/v1`) independent of the crate version. See
 [the specification §11](spec.md#11-schema-ir-compatibility-contract).
 
@@ -90,11 +121,13 @@ The IR is a versioned contract (`keydex.schema/v1`) independent of the crate ver
 
 ```rust
 if let Some(explanation) = snapshot.explain("db.host") {
-    explanation.winner.source;        // "env" or "file:app.yaml"
-    explanation.winner.tier;          // Tier::Environment
-    explanation.winner.span;          // Option<Span { file, line, col }>
-    explanation.shadowed;             // every origin that lost, oldest first
-    explanation.refs;                 // keys used through interpolation
+    println!("{}", explanation.winner.source);   // "env" or "file:app.yaml"
+    println!("{:?}", explanation.winner.tier);   // Tier::Environment
+    for shadowed in &explanation.shadowed {
+        if let Some(span) = &shadowed.span {
+            println!("shadowed by {}:{}:{}", span.file, span.line, span.col);
+        }
+    }
 }
 ```
 
@@ -107,7 +140,9 @@ One enum, always structured:
 ```rust
 match builder.build() {
     Ok(snapshot) => { /* ... */ }
-    Err(keydex_core::Error::MissingReference { path, reference }) => { /* ... */ }
+    Err(keydex_core::Error::MissingReference { path, reference }) => {
+        eprintln!("{path} refers to {reference}, which does not exist");
+    }
     Err(error) => eprintln!("{error}"),
 }
 ```
@@ -132,12 +167,15 @@ keydex-core = { version = "0.1", default-features = false, features = ["toml"] }
 ## Performance notes
 
 - Parsing, merging and interpolation happen once, in `build()`.
-- `LineIndex` converts byte offsets into line/column in O(log n); it is built once per file.
+- TOML and JSON produce byte offsets, converted to line/column through a `LineIndex` built
+  once per file. YAML parsers report the position directly.
 - The snapshot is immutable and `Sync`: share it between threads without locks.
 
-## What it does not do
+## What the core does not do
 
-- No file discovery, no watches, no network. Those belong to the caller.
+- No file discovery, no profiles, no watches, no network. Today the Python layer adds
+  environment, base files and profile files; a Rust caller registers documents itself.
+  Traits for sources, formats and resolvers are planned (see the roadmap).
 - No `eval`, no expressions in interpolation.
 - No global registration: everything is passed explicitly.
 
