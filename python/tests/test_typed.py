@@ -111,6 +111,23 @@ def test_relaxed_boolean(tmp_path: Path) -> None:
     assert cfg.db.tls is False
 
 
+@dataclass(frozen=True)
+class CredentialsDb:
+    user: str
+    password: str
+
+
+@dataclass(frozen=True)
+class SecretDb:
+    user: str
+    password: Secret[str]
+
+
+@dataclass(frozen=True)
+class SecretApp:
+    db: SecretDb
+
+
 class Mode(Enum):
     FAST = "fast"
     SLOW = "slow"
@@ -343,3 +360,63 @@ def test_indexing_and_dict_are_redacted_but_get_is_raw(tmp_path: Path) -> None:
     assert dict(settings)["db.password"] is None
     assert dict(settings.items())["db.password"] is None
     assert settings.get("db.password") == "s3cr3t"
+
+
+def test_a_container_with_a_secret_is_redacted(tmp_path: Path) -> None:
+    env = keydex.Environment(
+        files=[write(tmp_path, "db:\n  user: u\n  password: s3cr3t\n")], env={}
+    )
+    env.load(SecretApp)
+
+    assert env.settings()["db"] is None
+    assert env.explain("db")["redacted"] is True
+    assert env.explain("db")["value"] is None
+
+
+def test_a_nested_struct_default_is_respected(tmp_path: Path) -> None:
+    @dataclass(frozen=True)
+    class Db:
+        host: str
+
+    @dataclass(frozen=True)
+    class App:
+        db: Db = field(default_factory=lambda: Db(host="fallback"))
+
+    cfg = keydex.load(App, files=[write(tmp_path, "other: x\n")], env_prefix="APP_", env={})
+    assert cfg.db.host == "fallback"
+
+
+def test_a_str_field_from_a_list_is_a_validation_error(tmp_path: Path) -> None:
+    @dataclass(frozen=True)
+    class Named:
+        name: str
+
+    with pytest.raises(keydex.ValidationError) as info:
+        keydex.load(
+            Named, files=[write(tmp_path, "name:\n  - a\n  - b\n")], env_prefix="APP_", env={}
+        )
+    assert info.value.errors[0]["path"] == "name"
+
+
+def test_a_file_variable_marks_the_key_it_binds_to(tmp_path: Path) -> None:
+    # Single underscore: relaxed binding maps APP_DB_PASSWORD to db.password. The mark must
+    # follow the binding, not a parallel path guess.
+    @dataclass(frozen=True)
+    class Credentials:
+        db: "CredentialsDb"
+
+    reference = tmp_path / "pw"
+    reference.write_text("s3cr3t", encoding="utf-8")
+
+    env = keydex.Environment(
+        files=[write(tmp_path, "db:\n  user: u\n")],
+        env_prefix="APP_",
+        env={"APP_DB_PASSWORD_FILE": str(reference)},
+        secret_files=True,
+        secret_root=str(tmp_path),
+    )
+    cfg = env.load(Credentials)
+
+    assert cfg.db.password == "s3cr3t"
+    assert env.explain("db.password")["redacted"] is True
+    assert env.explain("db")["redacted"] is True

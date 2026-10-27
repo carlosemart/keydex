@@ -30,7 +30,7 @@ First functional release. `0.0.1` was only a name reservation.
   revalidates, and keeps the previous snapshot when the new configuration is invalid.
 - **Extension traits** `Source` and `Resolver`; `env` is a built-in resolver. `Format` is
   still a closed enum.
-- **Lock-free reads**: the snapshot lives in an `ArcSwap` (ADR 0008).
+- **Lock-free reads**: the snapshot lives in an `ArcSwap`.
 - **CLI**: `python -m keydex explain|dump`, with `--reveal`, `--sensitive`,
   `--secret-files` and `--secret-root`.
 - **Wheels**: `abi3-py311` built; `cp314t` built and tested in CI with the GIL verified

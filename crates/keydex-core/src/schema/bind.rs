@@ -11,7 +11,7 @@ pub fn bind_env(
     root: &Field,
     env: &BTreeMap<String, String>,
     prefix: &str,
-) -> Result<Vec<(String, String)>> {
+) -> Result<Vec<(String, String, String)>> {
     let mut dotted: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut relaxed: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut dynamic: Vec<String> = Vec::new();
@@ -42,12 +42,12 @@ pub fn bind_env(
                 .filter(|prefix| dotted_key.starts_with(&format!("{prefix}.")))
                 .max_by_key(|prefix| prefix.len());
             if let Some(_prefix) = prefix {
-                bindings.push((dotted_key.clone(), value.clone()));
+                bindings.push((dotted_key.clone(), value.clone(), name.clone()));
             }
             continue;
         };
         match paths.as_slice() {
-            [only] => bindings.push((only.clone(), value.clone())),
+            [only] => bindings.push((only.clone(), value.clone(), name.clone())),
             _ => {
                 return Err(Error::AmbiguousBinding {
                     env_var: name.clone(),

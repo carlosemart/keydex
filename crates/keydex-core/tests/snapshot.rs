@@ -228,10 +228,6 @@ fn build(base: &str, overlay: &str) -> keydex_core::Snapshot {
 #[test]
 fn a_higher_priority_source_replaces_a_sequence() {
     let cfg = build("tags:\n  - a\n  - b\n", "tags:\n  - c\n");
-    assert_eq!(
-        cfg.get("tags"),
-        Some(&Value::Seq(vec![])).map(|_| cfg.get("tags").unwrap())
-    );
     assert_eq!(cfg.get("tags").unwrap().to_string(), "[c]");
     assert_eq!(cfg.get("tags[1]"), None);
 }
@@ -351,4 +347,40 @@ fn yaml_merge_keys_are_resolved() {
 
     assert_eq!(cfg.get("svc.host"), Some(&Value::str("h")));
     assert_eq!(cfg.get("svc.port"), Some(&Value::Int(2)));
+}
+
+#[test]
+fn a_whole_placeholder_inherits_the_type() {
+    let mut builder = Builder::new();
+    builder
+        .document(
+            "x.yaml",
+            "port: 5432\nalias: ${port}\n",
+            Format::Yaml,
+            Tier::BaseFile,
+        )
+        .unwrap();
+    let cfg = builder.build().unwrap();
+    assert_eq!(cfg.get("alias"), Some(&Value::Int(5432)));
+}
+
+#[test]
+fn a_container_holding_a_secret_is_sensitive() {
+    let mut builder = Builder::new();
+    builder
+        .document(
+            "x.yaml",
+            "db:\n  user: u\n  password: s3cr3t\n",
+            Format::Yaml,
+            Tier::BaseFile,
+        )
+        .unwrap();
+    builder.mark_sensitive("db.password");
+    let cfg = builder.build().unwrap();
+
+    assert!(cfg.is_sensitive("db.password"));
+    assert!(
+        cfg.is_sensitive("db"),
+        "reading the parent would leak the child"
+    );
 }

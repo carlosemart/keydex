@@ -24,6 +24,7 @@ pub struct Builder {
     env: BTreeMap<String, String>,
     resolvers: Resolvers,
     sensitive: Vec<Path>,
+    sensitive_env: std::collections::BTreeSet<String>,
     next_order: u32,
 }
 
@@ -44,6 +45,7 @@ impl Default for Builder {
             env: BTreeMap::new(),
             resolvers: Resolvers::with_builtins(),
             sensitive: Vec::new(),
+            sensitive_env: std::collections::BTreeSet::new(),
             next_order: 0,
         }
     }
@@ -90,14 +92,21 @@ impl Builder {
             order: self.take_order(),
         };
         let mut root = Node::empty_map();
-        for (path, value) in env::parse(&self.env, prefix) {
+        for (path, value, name) in env::parse(&self.env, prefix) {
             let provenance = Provenance {
                 source: id.name.clone(),
                 tier,
                 order: id.order,
                 span: None,
             };
-            root = insert(root, path.segments(), value, provenance);
+            let sensitive = self.sensitive_env.contains(&name.to_ascii_uppercase());
+            let segments = path.segments().to_vec();
+            root = insert(root, &segments, value, provenance);
+            if sensitive {
+                if let Some(node) = node_at_mut(&mut root, &segments) {
+                    mark_subtree(node);
+                }
+            }
         }
         self.sources
             .push(Box::new(crate::source::ParsedSource::new(id, root)));
@@ -122,23 +131,34 @@ impl Builder {
             order: self.take_order(),
         };
         let mut root = Node::empty_map();
-        for (path, value) in crate::schema::bind_env(&schema.root, &self.env, prefix)? {
+        for (path, value, name) in crate::schema::bind_env(&schema.root, &self.env, prefix)? {
             let provenance = Provenance {
                 source: id.name.clone(),
                 tier,
                 order: id.order,
                 span: None,
             };
-            root = insert(
-                root,
-                Path::parse(&path).segments(),
-                Value::str(value),
-                provenance,
-            );
+            let sensitive = self.sensitive_env.contains(&name.to_ascii_uppercase());
+            let segments = Path::parse(&path).segments().to_vec();
+            root = insert(root, &segments, Value::str(value), provenance);
+            if sensitive {
+                if let Some(node) = node_at_mut(&mut root, &segments) {
+                    mark_subtree(node);
+                }
+            }
         }
         self.sources
             .push(Box::new(crate::source::ParsedSource::new(id, root)));
         Ok(self)
+    }
+
+    /// Marks as sensitive every key bound from this environment variable.
+    ///
+    /// The mapping from variable to path is done by the same binder that resolved it, so
+    /// relaxed binding cannot desynchronise the mark.
+    pub fn mark_sensitive_env(&mut self, name: &str) -> &mut Self {
+        self.sensitive_env.insert(name.to_ascii_uppercase());
+        self
     }
 
     /// Marks a key and its subtree as sensitive.

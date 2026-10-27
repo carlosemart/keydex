@@ -37,6 +37,8 @@ struct Spec {
     env_prefix: String,
     env: BTreeMap<String, String>,
     sensitive: Vec<String>,
+    /// Environment variables whose bound key must be marked sensitive (`*_FILE`).
+    sensitive_env: Vec<String>,
     /// Schema IR when the caller asked for a typed load; `None` in dictionary mode.
     schema: Option<String>,
     /// Unknown-key policy, kept so `refresh()` applies the same one.
@@ -103,10 +105,9 @@ impl PySettings {
                         resolved.display()
                     ))
                 })?;
-                env.insert(
-                    key[..key.len() - 5].to_string(),
-                    contents.trim().to_string(),
-                );
+                let stem = key[..key.len() - 5].to_string();
+                spec.sensitive_env.push(stem.clone());
+                env.insert(stem, contents.trim().to_string());
                 env.remove(&key);
             }
         }
@@ -228,7 +229,7 @@ impl PySettings {
 }
 
 #[pyfunction]
-#[pyo3(signature = (files, env_prefix = "", env = None, profiles = Vec::new(), sensitive = Vec::new(), refresh_env = true, secret_files = false, secret_root = None))]
+#[pyo3(signature = (files, env_prefix = "", env = None, profiles = Vec::new(), sensitive = Vec::new(), sensitive_env = Vec::new(), refresh_env = true, secret_files = false, secret_root = None))]
 /// Loads one or several files and applies environment variables and profiles.
 ///
 /// `sensitive` lists the keys that must be hidden from `explain`, `items` and `dump`.
@@ -238,6 +239,7 @@ fn load(
     env: Option<HashMap<String, String>>,
     profiles: Vec<String>,
     sensitive: Vec<String>,
+    sensitive_env: Vec<String>,
     refresh_env: bool,
     secret_files: bool,
     secret_root: Option<String>,
@@ -251,6 +253,7 @@ fn load(
             None => std::env::vars().collect(),
         },
         sensitive,
+        sensitive_env,
         schema: None,
         on_unknown: String::from("warn"),
         refresh_env,
@@ -265,7 +268,7 @@ fn load(
 }
 
 #[pyfunction]
-#[pyo3(signature = (ir, files, env_prefix = "", env = None, profiles = Vec::new(), on_unknown = "warn", sensitive = Vec::new(), refresh_env = true, secret_files = false, secret_root = None))]
+#[pyo3(signature = (ir, files, env_prefix = "", env = None, profiles = Vec::new(), on_unknown = "warn", sensitive = Vec::new(), sensitive_env = Vec::new(), refresh_env = true, secret_files = false, secret_root = None))]
 /// Loads with a schema in a single build: the typed tree and the settings share one
 /// snapshot, so `explain` describes exactly what the model was built from.
 ///
@@ -279,6 +282,7 @@ fn load_typed(
     profiles: Vec<String>,
     on_unknown: &str,
     sensitive: Vec<String>,
+    sensitive_env: Vec<String>,
     refresh_env: bool,
     secret_files: bool,
     secret_root: Option<String>,
@@ -292,6 +296,7 @@ fn load_typed(
             None => std::env::vars().collect(),
         },
         sensitive,
+        sensitive_env,
         schema: Some(ir.to_string()),
         on_unknown: on_unknown.to_string(),
         refresh_env,
@@ -356,6 +361,9 @@ fn load_typed(
 
 fn build_snapshot(spec: &Spec) -> PyResult<(Snapshot, Option<Schema>)> {
     let mut builder = Builder::new().with_env(spec.env.clone());
+    for name in &spec.sensitive_env {
+        builder.mark_sensitive_env(name);
+    }
 
     let schema = match &spec.schema {
         Some(ir) => {

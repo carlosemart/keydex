@@ -11,7 +11,7 @@ use crate::value::Value;
 /// case-insensitively, `__` separates levels and `_` is a literal character. No guessing:
 /// without a schema we do not infer.
 #[must_use]
-pub fn parse(env: &BTreeMap<String, String>, prefix: &str) -> Vec<(Path, Value)> {
+pub fn parse(env: &BTreeMap<String, String>, prefix: &str) -> Vec<(Path, Value, String)> {
     let wanted = prefix.to_ascii_uppercase();
     let mut out = Vec::new();
 
@@ -29,7 +29,11 @@ pub fn parse(env: &BTreeMap<String, String>, prefix: &str) -> Vec<(Path, Value)>
             .split('.')
             .map(|key| Segment::Key(key.to_string()))
             .collect();
-        out.push((Path::from_segments(segments), Value::str(value.as_str())));
+        out.push((
+            Path::from_segments(segments),
+            Value::str(value.as_str()),
+            name.clone(),
+        ));
     }
 
     out.sort_by(|a, b| a.0.cmp(&b.0));

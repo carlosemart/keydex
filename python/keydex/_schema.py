@@ -77,7 +77,12 @@ def _node(tp: object, *, required: bool, has_default: bool = False) -> dict:
             fields[field.name] = _node(
                 hints[field.name], required=not default, has_default=default
             )
-        return {"type": "struct", "required": required, "fields": fields}
+        return {
+            "type": "struct",
+            "required": required,
+            "has_default": has_default,
+            "fields": fields,
+        }
 
     if isinstance(tp, type) and issubclass(tp, Enum):
         return {

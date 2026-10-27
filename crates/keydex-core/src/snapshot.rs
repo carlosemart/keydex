@@ -36,7 +36,11 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    pub(crate) fn new(root: Node) -> Self {
+    pub(crate) fn new(mut root: Node) -> Self {
+        // A container that holds a secret is itself sensitive: otherwise reading `db`
+        // returns the password in the clear.
+        mark_containers(&mut root);
+
         let mut leaves = Vec::new();
         let mut path = Vec::new();
         walk::visit(&root, &mut path, &mut |segments, node| {
@@ -108,6 +112,28 @@ impl Snapshot {
             refs: node.refs.clone(),
         })
     }
+}
+
+/// Marks every node whose subtree contains a sensitive leaf.
+fn mark_containers(node: &mut Node) -> bool {
+    let mut any = node.sensitive;
+    match &mut node.value {
+        Value::Map(entries) => {
+            for child in entries.values_mut() {
+                any |= mark_containers(child);
+            }
+        }
+        Value::Seq(items) => {
+            for child in items.iter_mut() {
+                any |= mark_containers(child);
+            }
+        }
+        _ => {}
+    }
+    if any {
+        node.sensitive = true;
+    }
+    any
 }
 
 fn navigate<'a>(node: &'a Node, segments: &[Segment]) -> Option<&'a Node> {

@@ -2,6 +2,7 @@
 name = "keydex-core"
 description = "keydex configuration engine: sources, precedence, interpolation and provenance."
 readme = "README.md"
+include = ["src/**", "examples/**", "tests/**", "README.md", "AGENTS.md", "LICENSE-MIT", "LICENSE-APACHE"]
 keywords = ["configuration", "config", "settings", "environment"]
 categories = ["config"]
 version.workspace = true

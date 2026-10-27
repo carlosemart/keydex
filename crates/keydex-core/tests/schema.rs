@@ -444,3 +444,55 @@ fn a_bad_map_value_is_a_validation_error() {
     let errors = load_ir(MAP_IR, "limits:\n  cpu: many\n").unwrap_err();
     assert_eq!(errors[0].path, "limits.cpu");
 }
+
+#[test]
+fn a_required_secret_that_is_absent_is_a_validation_error() {
+    let ir = r#"{
+      "ir": "keydex.schema/v1",
+      "root": {"type":"struct","required":true,"fields":{
+        "password": {"type":"secret","required":true,"inner":{"type":"str","required":false}}
+      }}
+    }"#;
+    let errors = load_ir(ir, "other: x\n").unwrap_err();
+    assert_eq!(errors[0].path, "password");
+    assert!(errors[0].message.contains("required"), "{errors:?}");
+}
+
+#[test]
+fn a_struct_with_a_default_is_omitted_when_absent() {
+    let ir = r#"{
+      "ir": "keydex.schema/v1",
+      "root": {"type":"struct","required":true,"fields":{
+        "db": {"type":"struct","required":false,"has_default":true,"fields":{
+          "host": {"type":"str","required":true}
+        }}
+      }}
+    }"#;
+    let tree = load_ir(ir, "other: x\n").unwrap();
+    assert!(tree.get("db").is_none(), "{tree}");
+}
+
+#[test]
+fn a_str_field_rejects_a_list_instead_of_stringifying_it() {
+    let ir = r#"{
+      "ir": "keydex.schema/v1",
+      "root": {"type":"struct","required":true,"fields":{
+        "name": {"type":"str","required":true}
+      }}
+    }"#;
+    let errors = load_ir(ir, "name:\n  - a\n  - b\n").unwrap_err();
+    assert_eq!(errors[0].path, "name");
+    assert!(errors[0].message.contains("string"), "{errors:?}");
+}
+
+#[test]
+fn an_integer_is_not_a_boolean() {
+    let ir = r#"{
+      "ir": "keydex.schema/v1",
+      "root": {"type":"struct","required":true,"fields":{
+        "tls": {"type":"bool","required":false}
+      }}
+    }"#;
+    let errors = load_ir(ir, "tls: 1\n").unwrap_err();
+    assert_eq!(errors[0].path, "tls");
+}

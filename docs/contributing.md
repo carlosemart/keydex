@@ -44,7 +44,7 @@ examples/homelab-demo/tests`.
 
 This is the most invasive change; do it in this order:
 
-1. `crates/keydex-core/src/schema.rs`: add the variant to `FieldType`, then handle it in
+1. `crates/keydex-core/src/schema/mod.rs`: add the variant to `FieldType`, then handle it in
    `convert`, `walk` (structural validation), `collect_paths` (environment binding) and
    `collect_leaf_paths` (unknown keys).
 2. `python/keydex/_schema.py`: emit the new IR kind and construct the Python object in

@@ -54,6 +54,9 @@ fn node(
 ) -> Slot {
     match &field.kind {
         FieldType::Struct { fields } => {
+            if current.is_none() && field.has_default {
+                return Slot::Missing;
+            }
             let map = match current.map(|node| &node.value) {
                 Some(Value::Map(map)) => Some(map),
                 Some(other) => {
@@ -88,7 +91,18 @@ fn node(
             None | Some(Value::Null) => Slot::Value(Json::Null),
             _ => node(inner, current, path, errors),
         },
-        FieldType::Secret { inner } => node(inner, current, path, errors),
+        FieldType::Secret { inner } => match current {
+            None if field.has_default => Slot::Missing,
+            None if field.required => {
+                errors.push(ValidationError {
+                    path: path.to_string(),
+                    message: String::from("required field missing"),
+                    span: None,
+                });
+                Slot::Missing
+            }
+            _ => node(inner, current, path, errors),
+        },
         FieldType::Map { values } => match current.map(|node| &node.value) {
             Some(Value::Map(entries)) => {
                 let mut object = Map::new();
@@ -223,7 +237,12 @@ fn convert(kind: &FieldType, value: &Value) -> core::result::Result<Json, String
             Value::Str(s) => Ok(Json::String(s.clone())),
             other => Err(format!("any does not accept {}", kind_of(other))),
         },
-        FieldType::Str => Ok(Json::String(value.to_string())),
+        FieldType::Str => match value {
+            // Only text is text: a list stringified to "[a, b]" or a float to "1.1" is
+            // silent corruption, not a conversion.
+            Value::Str(s) => Ok(Json::String(s.clone())),
+            other => Err(format!("expected a string, got {}", kind_of(other))),
+        },
         FieldType::Int => match value {
             Value::Int(i) => Ok(Json::from(*i)),
             Value::Str(text) => text

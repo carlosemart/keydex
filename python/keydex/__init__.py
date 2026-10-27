@@ -107,7 +107,7 @@ class Environment:
             ValidationError: The configuration does not satisfy the model schema.
             KeydexError: A file cannot be read or the engine fails.
         """
-        source, derived = _environment(
+        source, secret_vars = _environment(
             self._env,
             self._env_prefix,
             secret_files=self._secret_files,
@@ -121,7 +121,8 @@ class Environment:
             source,
             self._profiles,
             self._on_unknown,
-            list(self._sensitive) + derived + _schema.sensitive_paths(model),
+            list(self._sensitive) + _schema.sensitive_paths(model),
+            secret_vars,
             self._env is None,
             self._secret_files,
             str(self._secret_root) if self._secret_root is not None else None,
@@ -230,7 +231,7 @@ def load_settings(
     Returns:
         A :class:`Settings` mapping with provenance support.
     """
-    source, derived = _environment(
+    source, secret_vars = _environment(
         env, env_prefix, secret_files=secret_files, secret_root=secret_root
     )
     return _load_settings(
@@ -238,7 +239,8 @@ def load_settings(
         env_prefix,
         source,
         list(profiles),
-        list(sensitive) + derived,
+        list(sensitive),
+        secret_vars,
         env is None,
         secret_files,
         str(secret_root) if secret_root is not None else None,
@@ -259,8 +261,9 @@ def _environment(
     engine: the core does not touch the filesystem.
 
     Returns:
-        The environment plus the keys derived from files, which callers must treat as
-        sensitive.
+        The environment plus the names of the variables that were resolved from a file.
+        The engine marks whatever key those variables bind to, using the same binder that
+        resolves them, so relaxed binding cannot desynchronise the mark.
     """
     source = dict(os.environ) if env is None else dict(env)
 
@@ -300,8 +303,6 @@ def _environment(
         # the secret and show up as an unknown key.
         del source[key]
 
-        stem = key[: -len("_FILE")]
-        suffix = stem[len(prefix) :] if prefix else stem
-        sensitive.append(suffix.lower().replace("__", "."))
+        sensitive.append(key[: -len("_FILE")])
 
     return source, sensitive

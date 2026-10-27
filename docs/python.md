@@ -246,8 +246,10 @@ UnknownKeyWarning: db.prot: unknown key, did you mean "db.port"?
 Control it with `on_unknown="warn" | "error" | "ignore"`. `"error"` turns the warning into
 a `ValidationError` (`path` is the key), which is what you want in CI.
 
-Not every failure is a `KeydexError`: an invalid `Enum` or `Secret[int]` raises `ValueError`
-or `TypeError` from the type layer (see the table above).
+Invalid `Enum`, `Decimal` or `UUID` values are `ValidationError`, like any other
+type error. The only exceptions outside that contract are *annotation* mistakes — a
+`Secret[int]`, a `dict[int, str]`, an unsupported type — which raise `TypeError` when the
+model is inspected, before any configuration is read.
 
 ## CLI
 

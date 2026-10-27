@@ -17,7 +17,8 @@ uv venv
 uv pip install -e .
 ```
 
-Published wheels are `abi3` for Python 3.11–3.15 plus a `cp314t` wheel for free-threading.
+The wheel matrix is `abi3` for Python 3.11–3.15 plus a `cp314t` build for free-threading;
+none of them is published yet.
 
 ## Usage
 

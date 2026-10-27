@@ -605,7 +605,7 @@ half an ecosystem.
 
 ## 18. Performance
 
-### 18.1 Budgets (CI gates)
+### 18.1 Budgets (targets; no CI gate yet)
 
 | Metric | Target | Measured |
 |---|---|---|

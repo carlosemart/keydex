@@ -29,3 +29,5 @@ python-source = "python"
 module-name = "keydex._keydex"
 manifest-path = "crates/keydex-py/Cargo.toml"
 strip = true
+# Never ship build leftovers from an editable install.
+exclude = ["**/__pycache__/**", "**/*.pyc"]

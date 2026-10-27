@@ -33,7 +33,7 @@ The tag triggers `.github/workflows/release.yml`:
 
 The free-threaded wheel (`cp314t`) is built and tested in CI (the GIL is asserted off) but
 **not published yet**: publishing is out of scope for now, not blocked by the read path —
-that became lock-free in ADR 0008.
+that became lock-free with the `ArcSwap` change.
 
 ## Why two builds
 
