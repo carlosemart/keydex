@@ -2,7 +2,9 @@
 
 Acceso a configuración para Python: **tipado, explicable y rápido**, con el motor en Rust.
 
-> Estado: pre-alpha. El nombre está reservado; todavía no hay nada instalable.
+> Estado: pre-alpha. Todavía no hay nada instalable. El repositorio está creado; la
+> reserva del nombre en PyPI y crates.io está pendiente de las credenciales de
+> publicación.
 
 ## La idea
 
