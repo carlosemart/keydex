@@ -1,0 +1,26 @@
+name: homelab
+env: dev
+
+db:
+  host: localhost
+  port: 5432
+  name: homelab
+  user: keydex
+  password: change-me
+  pool_size: 5
+  # Se define una sola vez: la interpolación se resuelve DESPUÉS del merge, así que
+  # en prod apuntará a db.internal sin repetir la línea.
+  dsn: "postgres://${db.user}@${db.host}:${db.port}/${db.name}"
+
+api:
+  base_url: https://api.homelab.local
+  timeout_s: 10
+  retries: 2
+
+features:
+  metrics: false
+  tracing: false
+
+backup:
+  dir: ./backups
+  keep_days: 7

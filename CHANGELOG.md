@@ -27,6 +27,9 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - **F3**: perfiles (`app-prod.yaml`), secretos (`Secret[T]`, indirección `*_FILE`),
   `refresh()` con intercambio atómico y CLI (`python -m keydex explain|dump`).
   `includes` queda pendiente para F3.1.
+- Ejemplo ejecutable [`examples/homelab-demo`](examples/homelab-demo/): perfiles
+  dev/prod, secretos por fichero, interpolación resuelta tras el merge y arranque que
+  falla con la ruta exacta si la configuración no valida.
 
 ## [0.0.1] - 2026-10-27
 

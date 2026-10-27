@@ -141,6 +141,7 @@ aplicación, ni una capa de bindings multi-lenguaje. Ver `AGENTS.md`.
 - [Especificación](docs/spec.md)
 - [Decisiones de arquitectura](docs/adr/)
 - [Instrucciones para agentes](AGENTS.md)
+- [Ejemplo ejecutable: servicio de homelab](examples/homelab-demo/)
 
 ## Desarrollo
 

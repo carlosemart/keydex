@@ -51,4 +51,4 @@ jobs:
       - run: python -m pip install --upgrade pip maturin pytest
       - run: maturin build --release --out dist
       - run: python -m pip install dist/*.whl
-      - run: python -m pytest python/tests -q
+      - run: python -m pytest python/tests examples/homelab-demo/tests -q

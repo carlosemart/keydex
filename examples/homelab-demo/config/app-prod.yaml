@@ -1,0 +1,13 @@
+env: prod
+
+db:
+  host: db.internal
+  pool_size: 20
+
+features:
+  metrics: true
+  tracing: true
+
+backup:
+  dir: /srv/backups
+  keep_days: 30
