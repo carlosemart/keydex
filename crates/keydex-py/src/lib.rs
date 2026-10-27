@@ -13,7 +13,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use arc_swap::ArcSwap;
 
 use keydex_core::{
     Builder, Error, Explanation, Format, Provenance, Schema, Snapshot, Tier, ValidationError,
@@ -45,15 +47,13 @@ struct Spec {
 #[pyclass(name = "Settings", module = "keydex", frozen)]
 struct PySettings {
     spec: Spec,
-    inner: Arc<RwLock<Arc<Snapshot>>>,
+    /// Lock-free reads: `load_full` is an atomic bump, only `refresh` swaps.
+    inner: ArcSwap<Snapshot>,
 }
 
 impl PySettings {
-    fn snapshot(&self) -> PyResult<Arc<Snapshot>> {
-        self.inner
-            .read()
-            .map(|guard| Arc::clone(&guard))
-            .map_err(|_| KeydexError::new_err("internal state poisoned"))
+    fn snapshot(&self) -> Arc<Snapshot> {
+        self.inner.load_full()
     }
 }
 
@@ -62,7 +62,7 @@ impl PySettings {
     /// Returns the value of a key, or `default` when it does not exist.
     #[pyo3(signature = (key, default = None))]
     fn get(&self, py: Python<'_>, key: &str, default: Option<Py<PyAny>>) -> PyResult<Py<PyAny>> {
-        match self.snapshot()?.get(key) {
+        match self.snapshot().get(key) {
             Some(value) => to_py(py, value),
             None => Ok(default.unwrap_or_else(|| py.None())),
         }
@@ -70,30 +70,30 @@ impl PySettings {
 
     /// Same as `get`, but raises `KeyError` when the key does not exist.
     fn __getitem__(&self, py: Python<'_>, key: &str) -> PyResult<Py<PyAny>> {
-        match self.snapshot()?.get(key) {
+        match self.snapshot().get(key) {
             Some(value) => to_py(py, value),
             None => Err(PyKeyError::new_err(key.to_string())),
         }
     }
 
     fn __contains__(&self, key: &str) -> PyResult<bool> {
-        Ok(self.snapshot()?.get(key).is_some())
+        Ok(self.snapshot().get(key).is_some())
     }
 
     fn __len__(&self) -> PyResult<usize> {
-        Ok(self.snapshot()?.len())
+        Ok(self.snapshot().len())
     }
 
     /// Keys in lexicographic order.
     fn keys(&self) -> PyResult<Vec<String>> {
-        Ok(self.snapshot()?.keys().map(ToString::to_string).collect())
+        Ok(self.snapshot().keys().map(ToString::to_string).collect())
     }
 
     /// `(key, value)` pairs in lexicographic order.
     ///
     /// Sensitive keys are returned as `None`: use `get()` when you need the value.
     fn items(&self, py: Python<'_>) -> PyResult<Vec<(String, Py<PyAny>)>> {
-        let snapshot = self.snapshot()?;
+        let snapshot = self.snapshot();
         snapshot
             .iter()
             .map(|(key, value)| {
@@ -112,7 +112,7 @@ impl PySettings {
     /// Sensitive keys report `value: None` and `redacted: true` unless `reveal` is set.
     #[pyo3(signature = (key, reveal = false))]
     fn explain(&self, py: Python<'_>, key: &str, reveal: bool) -> PyResult<Py<PyAny>> {
-        let snapshot = self.snapshot()?;
+        let snapshot = self.snapshot();
         match snapshot.explain(key) {
             Some(explanation) => {
                 explanation_to_py(py, &explanation, snapshot.is_sensitive(key) && !reveal)
@@ -148,16 +148,12 @@ impl PySettings {
                 }
             }
         }
-        let mut guard = self
-            .inner
-            .write()
-            .map_err(|_| KeydexError::new_err("internal state poisoned"))?;
-        *guard = Arc::new(snapshot);
+        self.inner.store(Arc::new(snapshot));
         Ok(())
     }
 
     fn __repr__(&self) -> PyResult<String> {
-        Ok(format!("<keydex.Settings keys={}>", self.snapshot()?.len()))
+        Ok(format!("<keydex.Settings keys={}>", self.snapshot().len()))
     }
 }
 
@@ -188,7 +184,7 @@ fn load(
     let (snapshot, _) = build_snapshot(&spec)?;
     Ok(PySettings {
         spec,
-        inner: Arc::new(RwLock::new(Arc::new(snapshot))),
+        inner: ArcSwap::from_pointee(snapshot),
     })
 }
 
@@ -265,7 +261,7 @@ fn load_typed(
 
     let settings = PySettings {
         spec,
-        inner: Arc::new(RwLock::new(Arc::new(snapshot))),
+        inner: ArcSwap::from_pointee(snapshot),
     };
 
     Ok((

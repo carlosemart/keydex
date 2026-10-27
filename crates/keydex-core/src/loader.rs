@@ -1,9 +1,11 @@
 //! Snapshot building.
 //!
-//! The `Builder` does not read files or the environment: it receives the contents and the
-//! captured variables. Reading is the responsibility of the calling layer.
+//! The `Builder` does not read files or the environment: it receives contents and a
+//! captured environment map. Reading is the responsibility of the caller or of a custom
+//! [`Source`] implementation.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::Snapshot;
 use crate::env;
@@ -11,27 +13,43 @@ use crate::error::Result;
 use crate::interp;
 use crate::merge::{insert, merge};
 use crate::parse::{self, Format};
-use crate::source::{Path, Segment, SourceId, Tier};
+use crate::resolve::{Resolver, Resolvers};
+use crate::source::{Path, Segment, Source, SourceId, Tier};
 use crate::value::{Node, Provenance, Value};
 
-/// One source and the tree it produced.
-#[derive(Debug, Clone)]
-struct SourceTree {
-    id: SourceId,
-    root: Node,
-}
-
 /// Snapshot builder.
-#[derive(Debug, Default)]
 pub struct Builder {
-    sources: Vec<SourceTree>,
+    sources: Vec<Box<dyn Source>>,
     env: BTreeMap<String, String>,
+    resolvers: Resolvers,
     sensitive: Vec<Path>,
     next_order: u32,
 }
 
+impl std::fmt::Debug for Builder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Builder")
+            .field("sources", &self.sources.len())
+            .field("resolvers", &self.resolvers)
+            .field("sensitive", &self.sensitive)
+            .finish()
+    }
+}
+
+impl Default for Builder {
+    fn default() -> Self {
+        Self {
+            sources: Vec::new(),
+            env: BTreeMap::new(),
+            resolvers: Resolvers::with_builtins(),
+            sensitive: Vec::new(),
+            next_order: 0,
+        }
+    }
+}
+
 impl Builder {
-    /// Empty builder.
+    /// Empty builder with the built-in resolvers.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -47,25 +65,41 @@ impl Builder {
         self
     }
 
+    /// Registers a resolver for `${name:...}`.
+    ///
+    /// A resolver replaces the built-in one with the same name.
+    pub fn resolver(&mut self, resolver: Arc<dyn Resolver>) -> &mut Self {
+        self.resolvers.register(resolver);
+        self
+    }
+
+    /// Adds a custom source.
+    ///
+    /// The source decides its own [`SourceId`], so it can pick a tier and an order.
+    pub fn source(&mut self, source: Box<dyn Source>) -> &mut Self {
+        self.sources.push(source);
+        self
+    }
+
     /// Adds an environment variable source.
     pub fn env_source(&mut self, prefix: &str, tier: Tier) -> &mut Self {
-        let order = self.take_order();
         let id = SourceId {
             name: String::from("env"),
             tier,
-            order,
+            order: self.take_order(),
         };
         let mut root = Node::empty_map();
         for (path, value) in env::parse(&self.env, prefix) {
             let provenance = Provenance {
                 source: id.name.clone(),
                 tier,
-                order,
+                order: id.order,
                 span: None,
             };
             root = insert(root, path.segments(), value, provenance);
         }
-        self.sources.push(SourceTree { id, root });
+        self.sources
+            .push(Box::new(crate::source::ParsedSource::new(id, root)));
         self
     }
 
@@ -81,18 +115,17 @@ impl Builder {
         prefix: &str,
         tier: Tier,
     ) -> Result<&mut Self> {
-        let order = self.take_order();
         let id = SourceId {
             name: String::from("env"),
             tier,
-            order,
+            order: self.take_order(),
         };
         let mut root = Node::empty_map();
         for (path, value) in crate::schema::bind_env(&schema.root, &self.env, prefix)? {
             let provenance = Provenance {
                 source: id.name.clone(),
                 tier,
-                order,
+                order: id.order,
                 span: None,
             };
             root = insert(
@@ -102,14 +135,12 @@ impl Builder {
                 provenance,
             );
         }
-        self.sources.push(SourceTree { id, root });
+        self.sources
+            .push(Box::new(crate::source::ParsedSource::new(id, root)));
         Ok(self)
     }
 
     /// Marks a key and its subtree as sensitive.
-    ///
-    /// Sensitivity travels with the node: it survives the merge, propagates through
-    /// interpolation, and makes every diagnostic output redact it by default.
     pub fn mark_sensitive(&mut self, key: &str) -> &mut Self {
         self.sensitive.push(Path::parse(key));
         self
@@ -123,44 +154,53 @@ impl Builder {
         format: Format,
         tier: Tier,
     ) -> Result<&mut Self> {
-        let order = self.take_order();
         let id = SourceId {
             name: format!("file:{name}"),
             tier,
-            order,
+            order: self.take_order(),
         };
 
         let mut root = Node::empty_map();
         for document in parse::parse(contents, name, format)? {
-            let mut document = document;
-            stamp(&mut document, &id);
             root = merge(root, document);
         }
 
-        self.sources.push(SourceTree { id, root });
+        self.sources
+            .push(Box::new(crate::source::ParsedSource::new(id, root)));
         Ok(self)
     }
 
     /// Applies precedence, resolves interpolations and returns the snapshot.
     pub fn build(self) -> Result<Snapshot> {
         let Builder {
-            mut sources,
+            sources,
             env,
+            resolvers,
             sensitive,
             ..
         } = self;
 
+        let mut trees: Vec<(SourceId, Node)> = Vec::with_capacity(sources.len());
+        for source in sources {
+            let id = source.id();
+            let mut root = source.read()?;
+            // Provenance is the builder's job, so a custom source does not have to know
+            // about it.
+            stamp(&mut root, &id);
+            trees.push((id, root));
+        }
+
         // Lowest priority first: band descending, order ascending. The last one wins.
-        sources.sort_by(|a, b| {
-            b.id.tier
+        trees.sort_by(|(a, _), (b, _)| {
+            b.tier
                 .rank()
-                .cmp(&a.id.tier.rank())
-                .then_with(|| a.id.order.cmp(&b.id.order))
+                .cmp(&a.tier.rank())
+                .then_with(|| a.order.cmp(&b.order))
         });
 
         let mut root = Node::empty_map();
-        for source in sources {
-            root = merge(root, source.root);
+        for (_, tree) in trees {
+            root = merge(root, tree);
         }
 
         for path in &sensitive {
@@ -169,7 +209,7 @@ impl Builder {
             }
         }
 
-        interp::resolve_tree(&mut root, &env)?;
+        interp::resolve_tree(&mut root, &env, &resolvers)?;
         Ok(Snapshot::new(root))
     }
 
@@ -177,30 +217,6 @@ impl Builder {
         let order = self.next_order;
         self.next_order = self.next_order.saturating_add(1);
         order
-    }
-}
-
-/// Attaches the source's provenance to every node of the tree.
-fn stamp(node: &mut Node, id: &SourceId) {
-    node.provenance = Some(Provenance {
-        source: id.name.clone(),
-        tier: id.tier,
-        order: id.order,
-        span: node.span.clone(),
-    });
-
-    match &mut node.value {
-        Value::Map(entries) => {
-            for child in entries.values_mut() {
-                stamp(child, id);
-            }
-        }
-        Value::Seq(items) => {
-            for child in items.iter_mut() {
-                stamp(child, id);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -232,6 +248,30 @@ fn mark_subtree(node: &mut Node) {
         Value::Seq(items) => {
             for child in items.iter_mut() {
                 mark_subtree(child);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Attaches the source's provenance to every node of the tree.
+fn stamp(node: &mut Node, id: &SourceId) {
+    node.provenance = Some(Provenance {
+        source: id.name.clone(),
+        tier: id.tier,
+        order: id.order,
+        span: node.span.clone(),
+    });
+
+    match &mut node.value {
+        Value::Map(entries) => {
+            for child in entries.values_mut() {
+                stamp(child, id);
+            }
+        }
+        Value::Seq(items) => {
+            for child in items.iter_mut() {
+                stamp(child, id);
             }
         }
         _ => {}

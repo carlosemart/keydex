@@ -52,6 +52,15 @@ First functional release. `0.0.1` was only a name reservation.
   `refresh()` revalidates and keeps the previous snapshot when the new configuration is
   invalid.
 
+### Added
+
+- `Source` and `Resolver` traits: a caller can add its own source (CLI, Vault, a fixture)
+  or its own `${name:args}` resolver without touching the core. `env` is now a built-in
+  resolver rather than a special case.
+- Lock-free reads: the snapshot lives in an `ArcSwap`, so `get`/`explain` take no lock and
+  `refresh()` swaps the pointer (ADR 0008).
+- The benchmark now measures the typed path too (200 fields, 1.23 ms).
+
 ### Known limitations
 
 - `imports:` / `includes:` not implemented (see specification §9.3).

@@ -171,11 +171,61 @@ keydex-core = { version = "0.1", default-features = false, features = ["toml"] }
   once per file. YAML parsers report the position directly.
 - The snapshot is immutable and `Sync`: share it between threads without locks.
 
+## Extending it
+
+Two traits make the engine open without touching it:
+
+```rust
+use std::collections::BTreeMap;
+use keydex_core::{Builder, Node, Source, SourceId, Tier, Value};
+
+struct CliSource;
+
+impl Source for CliSource {
+    fn id(&self) -> SourceId {
+        SourceId { name: "cli".into(), tier: Tier::Cli, order: 0 }
+    }
+
+    fn read(self: Box<Self>) -> keydex_core::Result<Node> {
+        let mut entries = BTreeMap::new();
+        entries.insert("debug".into(), Node::new(Value::Bool(true), None));
+        Ok(Node::new(Value::Map(entries), None))
+    }
+}
+
+let mut builder = Builder::new();
+builder.source(Box::new(CliSource));
+```
+
+Provenance is the builder's job: it stamps every tree with the source id, so a custom
+source does not have to know about spans or tiers beyond its own.
+
+A resolver is a pure function behind `${name:args}`:
+
+```rust
+struct Upper;
+
+impl keydex_core::Resolver for Upper {
+    fn name(&self) -> &'static str { "upper" }
+    fn resolve(&self, args: &[&str], _env: &BTreeMap<String, String>)
+        -> Result<Value, String> {
+        Ok(Value::str(args[0].to_uppercase()))
+    }
+}
+
+builder.resolver(std::sync::Arc::new(Upper));   // ${upper:hello} -> HELLO
+```
+
+`env` is a built-in resolver, registered by default. An unregistered name is a
+`UnknownResolver` error, not a silent empty value.
+
+Formats are still a closed enum (`yaml`, `toml`, `json`): adding one means editing the
+core. It is the next extension point, not a current one.
+
 ## What the core does not do
 
 - No file discovery, no profiles, no watches, no network. Today the Python layer adds
   environment, base files and profile files; a Rust caller registers documents itself.
-  Traits for sources, formats and resolvers are planned (see the roadmap).
 - No `eval`, no expressions in interpolation.
 - No global registration: everything is passed explicitly.
 

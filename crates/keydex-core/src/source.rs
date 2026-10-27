@@ -210,3 +210,45 @@ pub fn render_path(segments: &[Segment]) -> String {
 fn needs_quoting(key: &str) -> bool {
     key.is_empty() || key.contains(['.', '[', ']', '"'])
 }
+
+/// A configuration source.
+///
+/// The engine knows nothing about how a source obtains its data: files, environment,
+/// Vault or a test fixture all look the same from here. `read` consumes the box so a
+/// source can move its tree out instead of cloning it.
+pub trait Source: Send {
+    /// Identity used for provenance: name, band and order.
+    fn id(&self) -> SourceId;
+
+    /// Produces the tree contributed by this source.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the source cannot be read or parsed.
+    fn read(self: Box<Self>) -> crate::error::Result<crate::value::Node>;
+}
+
+/// A built-in source: a tree that was already parsed.
+#[derive(Debug)]
+pub struct ParsedSource {
+    id: SourceId,
+    root: crate::value::Node,
+}
+
+impl ParsedSource {
+    /// Wraps an already parsed tree.
+    #[must_use]
+    pub fn new(id: SourceId, root: crate::value::Node) -> Self {
+        Self { id, root }
+    }
+}
+
+impl Source for ParsedSource {
+    fn id(&self) -> SourceId {
+        self.id.clone()
+    }
+
+    fn read(self: Box<Self>) -> crate::error::Result<crate::value::Node> {
+        Ok(self.root)
+    }
+}

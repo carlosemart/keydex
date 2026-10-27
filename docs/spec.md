@@ -551,11 +551,12 @@ keydex/
 
 | Module | Responsibility |
 |---|---|
-| `source` | `Tier`, `SourceId`, raw entries |
+| `source` | `Tier`, `SourceId`, `Path`, the `Source` trait |
 | `parse` | Span-preserving parsers (YAML, TOML, JSON) plus `LineIndex` |
 | `env` | Dictionary-mode environment source |
 | `loader` | `Builder`: precedence, merge, provenance assembly |
-| `interp` | Interpolation graph, cycles, resolvers |
+| `interp` | Interpolation graph, cycles |
+| `resolve` | `Resolver` trait, registry, built-in `env` |
 | `schema` | Schema IR (serde), coercion, validation, relaxed binding, unknown keys |
 | `snapshot` | Immutable snapshot and `Explanation` |
 | `error` | `thiserror` enums |
@@ -584,7 +585,8 @@ half an ecosystem.
 
 - `build`/`load_typed` and `refresh()` are the only expensive crossings.
 - Typed decode produces the final Python objects in one pass.
-- `gil_used = false` in the PyO3 module; global state behind an `RwLock`.
+- `gil_used = false` in the PyO3 module; the snapshot lives in an `ArcSwap`, so reads take
+  no lock and `refresh()` swaps the pointer.
 - `abi3` is a crate feature (`default = ["abi3"]`); the free-threaded build uses
   `--no-default-features`.
 

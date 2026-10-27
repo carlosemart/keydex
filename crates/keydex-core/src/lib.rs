@@ -75,6 +75,7 @@ mod interp;
 mod loader;
 mod merge;
 mod parse;
+mod resolve;
 #[cfg(feature = "schema")]
 mod schema;
 mod snapshot;
@@ -84,11 +85,12 @@ mod value;
 pub use error::{Error, Result};
 pub use loader::Builder;
 pub use parse::{Format, LineIndex};
+pub use resolve::{EnvResolver, Resolver, Resolvers};
 #[cfg(feature = "schema")]
 #[cfg_attr(docsrs, doc(cfg(feature = "schema")))]
 pub use schema::{Field, IR_VERSION, Schema, UnknownKey, ValidationError, coerce, unknown_keys};
 pub use snapshot::{Explanation, Snapshot};
-pub use source::{Path, Segment, SourceId, Tier};
+pub use source::{ParsedSource, Path, Segment, Source, SourceId, Tier};
 pub use value::{Node, Provenance, Span, Value};
 
 /// Version of the schema contract (`keydex.schema/v1`).

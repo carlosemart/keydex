@@ -74,6 +74,15 @@ pub enum Error {
         cycle: String,
     },
 
+    /// A placeholder names a resolver that is not registered.
+    #[error("unknown resolver {name} in {path}")]
+    UnknownResolver {
+        /// Key where the placeholder appears.
+        path: String,
+        /// Resolver name.
+        name: String,
+    },
+
     /// Placeholder with invalid syntax.
     #[error("malformed placeholder in {path}: {snippet}")]
     MalformedPlaceholder {

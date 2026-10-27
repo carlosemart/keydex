@@ -10,12 +10,13 @@ cheaper than building a tree of Python objects.
 
 from __future__ import annotations
 
+import dataclasses
 import statistics
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import keydex
 from omegaconf import OmegaConf
@@ -44,23 +45,38 @@ def bench(label: str, fn: Callable[[], object], iters: int = ITERS) -> float:
     return median
 
 
+def make_typed(n: int) -> tuple[type, Path]:
+    fields = [(f"k{i:03d}", int, dataclasses.field(default=0)) for i in range(n)]
+    model = dataclasses.make_dataclass("Bench", fields, frozen=True)
+    lines = [f"k{i:03d}: {i}" for i in range(n)]
+    path = Path(tempfile.mkdtemp()) / "typed.yaml"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return model, path
+
+
 def main() -> None:
     path = make_doc(N)
     size = path.stat().st_size
     print(f"\n{N + 4} keys · {size / 1024:.1f} KiB · median of {ITERS} runs\n")
 
+    model, typed_path = make_typed(200)
+    bench(
+        "keydex.load (typed, 200 fields)",
+        lambda: keydex.load(model, files=[str(typed_path)], env_prefix="BENCH_", env={}),
+    )
+
     t_keydex = bench(
-        "keydex.load",
+        "keydex.load_settings (1000 keys)",
         lambda: keydex.load_settings([str(path)], env_prefix="BENCH_", env={}),
     )
-    t_omega = bench("OmegaConf.load", lambda: OmegaConf.load(path))
+    t_omega = bench("OmegaConf.load (1000 keys)", lambda: OmegaConf.load(path))
 
     cfg = keydex.load_settings([str(path)], env_prefix="BENCH_", env={})
     oc = OmegaConf.load(path)
     bench("keydex explicit (explain)", lambda: cfg.explain("k0500"))
     bench("OmegaConf access", lambda: oc.k0500)
 
-    print(f"\nload ratio: {t_omega / t_keydex:.1f}x faster than OmegaConf")
+    print(f"\ndictionary-mode ratio: {t_omega / t_keydex:.1f}x faster than OmegaConf")
 
 
 if __name__ == "__main__":

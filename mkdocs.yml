@@ -26,6 +26,7 @@ nav:
       - 0005 Mandatory spans: adr/0005-mandatory-spans.md
       - 0006 Parser selection: adr/0006-parsers-with-spans.md
       - 0007 IR over serde: adr/0007-schema-ir-over-serde.md
+      - 0008 Lock-free reads: adr/0008-arc-swap-lock-free-reads.md
   - Spikes:
       - Parser spans: spikes/0001-parsers-spans.md
 

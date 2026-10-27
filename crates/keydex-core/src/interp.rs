@@ -7,14 +7,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{Error, Result};
+use crate::resolve::Resolvers;
 use crate::source::{Segment, render_path};
 use crate::value::{Node, Value};
 
 /// Origin of a reference.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Target<'a> {
     Key(&'a str),
-    Env(&'a str),
+    Resolver { name: &'a str, args: Vec<&'a str> },
 }
 
 /// Placeholder located inside a string.
@@ -36,10 +37,12 @@ pub(crate) type ResolvedMaps = (BTreeMap<String, Value>, BTreeMap<String, Vec<St
 pub(crate) fn resolve_all(
     raw: &BTreeMap<String, Value>,
     env: &BTreeMap<String, String>,
+    resolvers: &Resolvers,
 ) -> Result<ResolvedMaps> {
     let mut resolver = Resolver {
         raw,
         env,
+        resolvers,
         done: BTreeMap::new(),
         refs: BTreeMap::new(),
         stack: Vec::new(),
@@ -55,6 +58,7 @@ pub(crate) fn resolve_all(
 struct Resolver<'a> {
     raw: &'a BTreeMap<String, Value>,
     env: &'a BTreeMap<String, String>,
+    resolvers: &'a Resolvers,
     done: BTreeMap<String, Value>,
     refs: BTreeMap<String, Vec<String>>,
     stack: Vec<String>,
@@ -128,13 +132,23 @@ impl Resolver<'_> {
     }
 
     fn eval(&mut self, placeholder: &Placeholder<'_>, path: &str) -> Result<Value> {
-        match placeholder.target {
-            Target::Env(name) => match self.env.get(name) {
-                Some(value) => Ok(Value::str(value.as_str())),
-                None => self.fallback(placeholder, path, &format!("env:{name}")),
-            },
+        match &placeholder.target {
+            Target::Resolver { name, args } => {
+                let Some(resolver) = self.resolvers.get(name) else {
+                    return Err(Error::UnknownResolver {
+                        path: path.to_string(),
+                        name: name.to_string(),
+                    });
+                };
+                match resolver.resolve(args.as_slice(), self.env) {
+                    Ok(value) => Ok(value),
+                    Err(_) => {
+                        self.fallback(placeholder, path, &format!("{name}:{}", args.join(",")))
+                    }
+                }
+            }
             Target::Key(key) => {
-                if !self.raw.contains_key(key) {
+                if !self.raw.contains_key(*key) {
                     return self.fallback(placeholder, path, key);
                 }
                 let value = self.resolve(key)?;
@@ -226,10 +240,12 @@ fn parse_inner(
     if target.is_empty() {
         return Err(inner.to_string());
     }
-    let target = match target.strip_prefix("env:") {
-        Some(name) if !name.is_empty() => Target::Env(name),
-        Some(_) => return Err(inner.to_string()),
-        None => Target::Key(target),
+    let target = match target.split_once(':') {
+        Some((name, args)) if !name.is_empty() && !name.contains('.') => Target::Resolver {
+            name,
+            args: args.split(',').map(str::trim).collect(),
+        },
+        _ => Target::Key(target),
     };
     Ok(Placeholder {
         start,
@@ -271,11 +287,15 @@ fn split_default(inner: &str) -> (&str, Option<&str>) {
 /// Leaves are collected into a flat map, resolved once (with memoisation and cycle
 /// detection) and written back. Structural replacement already happened in the merge, so
 /// interpolation cannot resurrect or drop list items.
-pub(crate) fn resolve_tree(root: &mut Node, env: &BTreeMap<String, String>) -> Result<()> {
+pub(crate) fn resolve_tree(
+    root: &mut Node,
+    env: &BTreeMap<String, String>,
+    resolvers: &Resolvers,
+) -> Result<()> {
     let mut raw = BTreeMap::new();
     collect_leaves(root, &mut Vec::new(), &mut raw);
 
-    let (values, refs) = resolve_all(&raw, env)?;
+    let (values, refs) = resolve_all(&raw, env, resolvers)?;
     apply_leaves(root, &mut Vec::new(), &values, &refs);
     propagate_sensitivity(root);
     Ok(())
