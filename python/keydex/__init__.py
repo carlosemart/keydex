@@ -46,7 +46,8 @@ class UnknownKeyWarning(UserWarning):
 class ValidationError(KeydexError):
     """The snapshot does not satisfy the model schema.
 
-    `errors` is a list of dictionaries with `path` and `message`, one per problem.
+    Attributes:
+        errors: One dictionary per problem, with `path` and `message` keys.
     """
 
     def __init__(self, errors: list[dict[str, str]]) -> None:
@@ -66,8 +67,24 @@ def load(
 ) -> T:
     """Loads the configuration and returns a typed instance of the model.
 
-    `on_unknown` decides what happens with keys the schema does not use: `"warn"`
-    (default, `UnknownKeyWarning`), `"error"` (`ValidationError`) or `"ignore"`.
+    Args:
+        model: Dataclass describing the configuration. Field types drive coercion and
+            fields without a default are required.
+        files: Configuration files, in application order.
+        env_prefix: Prefix stripped from environment variables, for example `"APP_"`.
+        env: Environment to use. Defaults to `os.environ`; tests should inject one
+            instead of mutating the process environment.
+        profiles: Active profiles. `app.yaml` plus `"prod"` applies `app-prod.yaml`.
+        on_unknown: What to do with keys no field uses: `"warn"` (default,
+            :class:`UnknownKeyWarning`), `"error"` (:class:`ValidationError`) or
+            `"ignore"`.
+
+    Returns:
+        An instance of ``model``.
+
+    Raises:
+        ValidationError: The configuration does not satisfy the model schema.
+        KeydexError: A file cannot be read or the engine fails.
     """
     ir = json.dumps(_schema.build_ir(model), separators=(",", ":"))
     errors, unknown, tree = _load_typed(
@@ -95,7 +112,17 @@ def load_settings(
     env: dict[str, str] | None = None,
     profiles: tuple[str, ...] | list[str] = (),
 ) -> Settings:
-    """Loads the configuration in dictionary mode, without a schema."""
+    """Loads the configuration in dictionary mode, without a schema.
+
+    Args:
+        files: Configuration files, in application order.
+        env_prefix: Prefix stripped from environment variables.
+        env: Environment to use. Defaults to `os.environ`.
+        profiles: Active profiles, applied as ``<name>-<profile>.<ext>``.
+
+    Returns:
+        A :class:`Settings` mapping with provenance support.
+    """
     return _load_settings(
         list(files), env_prefix, _environment(env, env_prefix), list(profiles)
     )

@@ -48,6 +48,20 @@ cargo test --workspace --exclude keydex-py
 ./scripts/gate.sh      # architecture invariants (hard rules 1 and 2)
 ```
 
+Documentation:
+
+```
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features -p keydex-core
+mkdocs build --strict   # needs mkdocs-material, mkdocstrings[python] and ruff
+```
+
+## Docs rules
+
+- Public Rust items need doc comments (`missing_docs` is denied) and intra-doc links.
+- Public Python API needs Google-style docstrings (Args/Returns/Raises).
+- Every example in `docs/` must be runnable; the Rust ones live in `crates/keydex-core/examples/`.
+- A behaviour change updates `docs/spec.md` in the same PR.
+
 ## Git
 
 - **Never `git push` to `main`.** It is protected: branch plus PR, always.
@@ -62,6 +76,7 @@ cargo test --workspace --exclude keydex-py
 - [ ] there is a test that fails without the change
 - [ ] `./scripts/check.sh` and `./scripts/gate.sh` are green, and
       `cargo test --workspace --exclude keydex-py` passes
+- [ ] `mkdocs build --strict` passes if docstrings or `docs/` changed
 - [ ] no performance regression once a benchmark exists
 - [ ] `docs/spec.md` updated if behaviour changed
 - [ ] entry in `CHANGELOG.md`

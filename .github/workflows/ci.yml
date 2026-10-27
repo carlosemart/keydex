@@ -69,3 +69,17 @@ jobs:
       - name: The GIL must stay disabled
         run: .venv-ft/bin/python -c "import sys, keydex; assert not sys._is_gil_enabled(), 'the module forces the GIL'"
       - run: .venv-ft/bin/python -m pytest python/tests examples/homelab-demo/tests -q
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Rustdoc must be warning-free
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features -p keydex-core
+      - run: python -m pip install --upgrade pip mkdocs-material "mkdocstrings[python]" ruff
+      - name: Documentation must build strictly
+        run: mkdocs build --strict

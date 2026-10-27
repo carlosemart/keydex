@@ -1,7 +1,7 @@
 # 0001 — Parser spans
 
 - Date: 2026-10-27
-- Spike: [`spikes/spans/`](../../spikes/spans/)
+- Spike: [`spikes/spans/`](https://github.com/carlosemart/keydex/tree/main/spikes/spans)
 - Question: can we get line and column for every key in YAML, TOML and JSON, and at what
   cost?
 

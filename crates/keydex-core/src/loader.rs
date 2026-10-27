@@ -58,6 +58,7 @@ impl Builder {
     /// Unlike [`Builder::env_source`], here `APP_DB_HOST` matches `db.host` without
     /// needing `__`: the schema disambiguates.
     #[cfg(feature = "schema")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "schema")))]
     pub fn schema_env_source(
         &mut self,
         schema: &crate::schema::Schema,

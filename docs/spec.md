@@ -757,6 +757,8 @@ keydex/
 │   └── bench/
 ├── docs/
 │   ├── spec.md               # this specification
+│   ├── python.md             # Python usage guide
+│   ├── rust.md               # Rust usage guide
 │   ├── benchmarks.md
 │   ├── release.md
 │   ├── adr/                  # 0001-*.md …

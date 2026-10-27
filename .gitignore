@@ -16,3 +16,4 @@ python/keydex/_keydex*
 *.pyd
 *.dylib
 dist-ft/
+site/

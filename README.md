@@ -152,10 +152,20 @@ multi-language binding layer. See `AGENTS.md`.
 
 ## Documentation
 
+- [Python guide](docs/python.md)
+- [Rust guide](docs/rust.md)
 - [Specification](docs/spec.md)
 - [Architecture decisions](docs/adr/)
 - [Agent instructions](AGENTS.md)
 - [Runnable example: homelab service](examples/homelab-demo/)
+
+The published site is built from `docs/` with mkdocs-material and mkdocstrings
+(`mkdocs build --strict`); the Rust side is rustdoc, with two runnable examples:
+
+```bash
+cargo run -p keydex-core --example basic
+cargo run -p keydex-core --example schema
+```
 
 ## Development
 

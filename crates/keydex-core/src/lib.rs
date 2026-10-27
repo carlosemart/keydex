@@ -10,9 +10,39 @@
 //!   injected.
 //! - Errors are enums, never `String`.
 //! - No mutable global state.
+//!
+//! # Example
+//!
+//! ```
+//! use keydex_core::{Builder, Format, Tier};
+//!
+//! let mut builder = Builder::new();
+//! builder
+//!     .document(
+//!         "app.yaml",
+//!         "db:\n  host: localhost\n  port: 5432\n  url: \"${db.host}:${db.port}\"\n",
+//!         Format::Yaml,
+//!         Tier::BaseFile,
+//!     )
+//!     .unwrap();
+//!
+//! let snapshot = builder.build().unwrap();
+//!
+//! assert_eq!(snapshot.get("db.host").unwrap().to_string(), "localhost");
+//! // Interpolation is resolved once, at build time.
+//! assert_eq!(snapshot.get("db.url").unwrap().to_string(), "localhost:5432");
+//! // Every value knows where it came from.
+//! assert_eq!(
+//!     snapshot.explain("db.host").unwrap().winner.source,
+//!     "file:app.yaml"
+//! );
+//! ```
+//!
+//! See `examples/basic.rs` and `examples/schema.rs` for complete programs.
 
 #![forbid(unsafe_code)]
 #![forbid(static_mut_refs)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(
     missing_docs,
     clippy::panic,
@@ -36,6 +66,7 @@ pub use error::{Error, Result};
 pub use loader::Builder;
 pub use parse::{Format, LineIndex};
 #[cfg(feature = "schema")]
+#[cfg_attr(docsrs, doc(cfg(feature = "schema")))]
 pub use schema::{Field, IR_VERSION, Schema, UnknownKey, ValidationError, coerce, unknown_keys};
 pub use snapshot::{Explanation, Snapshot};
 pub use source::{RawEntry, RawSource, SourceId, Tier};
