@@ -632,7 +632,7 @@ en ese momento.
 | Fase | Entregable | Criterio de salida |
 |---|---|---|
 | **F0** ✅ | Workspace, `AGENTS.md` + `docs/spec.md` + `just gate`, spikes de parsers con spans, esqueleto de errores | Spans correctos y `just gate` en verde |
-| **F1** | `keydex-core` (sources, merge, interp, snapshot) + `keydex-py` dict-mode | Carga YAML+env, `${}`, `explain`, benchmark vs OmegaConf |
+| **F1** ✅ | `keydex-core` (sources, merge, interp, snapshot) + `keydex-py` dict-mode | Carga YAML+env, `${}`, `explain`, benchmark vs OmegaConf |
 | **F2** | Esquema tipado: dataclasses, coerción, validación agregada, `.pyi` | `load(App)` completo con errores con path |
 | **F3** | Perfiles, includes, secretos, `refresh()`, CLI | Suite dorada verde; secretos sin fuga |
 | **F4** | Publicación: wheels abi3 + 314t, crates.io, docs | Instalable desde PyPI en 3.11–3.14t |
