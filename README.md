@@ -118,11 +118,18 @@ APP_DB__PASSWORD_FILE=/run/secrets/db_password
 ```
 
 ```python
-keydex.load(App, files=["app.yaml"], secret_files=True, secret_root="/run/secrets")
+keydex.load(
+    App,
+    files=["app.yaml"],
+    env_prefix="APP_",          # without a prefix the process environment is not read
+    secret_files=True,
+    secret_root="/run/secrets",
+)
 ```
 
 Without `secret_files=True` no file is read; a path outside `secret_root` raises
-`KeydexError`.
+`KeydexError`. The prefix is not optional here: with no prefix and no `env=`, no
+environment variable is read at all.
 
 ## Reload
 

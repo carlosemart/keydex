@@ -23,11 +23,19 @@ with the output of `python -m keydex dump` (redacted).
 It is opt-in and confined:
 
 ```python
-keydex.load(App, files=["app.yaml"], secret_files=True, secret_root="/run/secrets")
+keydex.load(
+    App,
+    files=["app.yaml"],
+    env_prefix="APP_",          # without a prefix the process environment is not read
+    secret_files=True,
+    secret_root="/run/secrets",
+)
 ```
 
 Without `secret_files=True` no file is read (by design: it would be an arbitrary file-read
-surface). A path outside `secret_root`, or a missing file, raises `KeydexError`.
+surface). A path outside `secret_root`, or a missing file, raises `KeydexError`. And with no
+`env_prefix` and no `env=`, nothing is read from the process environment in the first place,
+so `*_FILE` never triggers: that is the most common cause of this symptom.
 
 ## `UnknownKeyWarning: … unknown key`
 

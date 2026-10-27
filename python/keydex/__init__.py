@@ -126,7 +126,7 @@ class Environment:
             secret_vars,
             self._env is None and bool(self._env_prefix),
             self._secret_files,
-            str(self._secret_root) if self._secret_root is not None else None,
+            _secret_root_arg(self._secret_root),
         )
         if errors:
             raise ValidationError(errors)
@@ -246,8 +246,17 @@ def load_settings(
         secret_vars,
         env is None and bool(env_prefix),
         secret_files,
-        str(secret_root) if secret_root is not None else None,
+        _secret_root_arg(secret_root),
     )
+
+
+def _secret_root_arg(value: str | os.PathLike[str] | None) -> str | None:
+    """Normalises `secret_root` the way :func:`_environment` does.
+
+    The binding resolves it again on `refresh()`; handing it an absolute, expanded path
+    keeps the two loads looking at the same directory (`~user/...`, symlinks).
+    """
+    return None if value is None else str(Path(value).expanduser().resolve())
 
 
 def _environment(

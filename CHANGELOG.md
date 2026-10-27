@@ -52,7 +52,11 @@ First functional release. `0.0.1` was only a name reservation.
   `HOME` or `PATH` could silently override configuration keys. `refresh()` follows the same
   rule, so a reload cannot reintroduce them.
 - `MalformedPlaceholder` reports the byte offset instead of the offending fragment, which
-  can contain a secret and would reach a log before redaction.
+  can contain a secret and would reach a log before redaction. Parse errors use the
+  parser's message plus the position, never the source line that failed (TOML's formatter
+  echoes it).
+- `refresh()` skips the filesystem entirely when no `*_FILE` variable exists, and tolerates
+  a non-UTF-8 variable instead of panicking.
 
 ### Fixed
 

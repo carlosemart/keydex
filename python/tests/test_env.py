@@ -171,3 +171,19 @@ def test_refresh_expands_a_home_relative_secret_root(
 
     assert env.settings()["db"] is None
     assert env.explain("db.password")["redacted"] is True
+
+
+def test_refresh_of_an_injected_environment_stays_injected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # env={} is a promise that the process environment is irrelevant; refresh must not
+    # quietly start reading it.
+    monkeypatch.setenv("APP_HOST", "from-the-shell")
+    source = write(tmp_path, "app.yaml", "host: from-file\n")
+
+    settings = keydex.load_settings(files=[source], env_prefix="APP_", env={})
+    assert settings["host"] == "from-file"
+
+    settings.refresh()
+
+    assert settings["host"] == "from-file"

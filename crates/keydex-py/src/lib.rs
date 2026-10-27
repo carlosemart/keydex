@@ -75,46 +75,59 @@ impl PySettings {
             return Ok(spec);
         }
 
-        let mut env: BTreeMap<String, String> = std::env::vars().collect();
+        // Non-UTF-8 entries are skipped rather than panicking: `std::env::vars` panics on
+        // them, and a configuration library has no business taking the process down.
+        let mut env: BTreeMap<String, String> = std::env::vars_os()
+            .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+            .collect();
 
         if spec.secret_files {
-            let root = spec.secret_root.as_deref().ok_or_else(|| {
-                KeydexError::new_err("secret_root is required when secret_files is enabled")
-            })?;
-            let root = std::fs::canonicalize(expand_tilde(root))
-                .map_err(|err| KeydexError::new_err(format!("secret_root {root}: {err}")))?;
+            let candidates: Vec<String> = env
+                .keys()
+                .filter(|key| {
+                    let upper = key.to_ascii_uppercase();
+                    upper.ends_with("_FILE")
+                        && (spec.env_prefix.is_empty()
+                            || upper.starts_with(&spec.env_prefix.to_ascii_uppercase()))
+                })
+                .cloned()
+                .collect();
 
-            for key in env.keys().cloned().collect::<Vec<_>>() {
-                let upper = key.to_ascii_uppercase();
-                if !upper.ends_with("_FILE") {
-                    continue;
-                }
-                if !spec.env_prefix.is_empty()
-                    && !upper.starts_with(&spec.env_prefix.to_ascii_uppercase())
-                {
-                    continue;
-                }
-                let reference = env[&key].clone();
-                let resolved = std::fs::canonicalize(expand_tilde(&reference)).map_err(|err| {
-                    KeydexError::new_err(format!("{key}: cannot read {reference}: {err}"))
+            // No `*_FILE` variable, no reason to touch the filesystem: a `secret_root` that
+            // no longer exists must not turn a refresh into a failure.
+            if !candidates.is_empty() {
+                let root = spec.secret_root.as_deref().ok_or_else(|| {
+                    KeydexError::new_err("secret_root is required when secret_files is enabled")
                 })?;
-                if !resolved.starts_with(&root) {
-                    return Err(KeydexError::new_err(format!(
-                        "{key}: {} is outside secret_root ({})",
-                        resolved.display(),
-                        root.display()
-                    )));
+                let root = std::fs::canonicalize(expand_tilde(root))
+                    .map_err(|err| KeydexError::new_err(format!("secret_root {root}: {err}")))?;
+
+                for key in candidates {
+                    let reference = env[&key].clone();
+                    let resolved =
+                        std::fs::canonicalize(expand_tilde(&reference)).map_err(|err| {
+                            KeydexError::new_err(format!("{key}: cannot read {reference}: {err}"))
+                        })?;
+                    if !resolved.starts_with(&root) {
+                        return Err(KeydexError::new_err(format!(
+                            "{key}: {} is outside secret_root ({})",
+                            resolved.display(),
+                            root.display()
+                        )));
+                    }
+                    let contents = std::fs::read_to_string(&resolved).map_err(|err| {
+                        KeydexError::new_err(format!(
+                            "{key}: cannot read {}: {err}",
+                            resolved.display()
+                        ))
+                    })?;
+                    let stem = key[..key.len() - 5].to_string();
+                    if !spec.sensitive_env.contains(&stem) {
+                        spec.sensitive_env.push(stem.clone());
+                    }
+                    env.insert(stem, contents.trim().to_string());
+                    env.remove(&key);
                 }
-                let contents = std::fs::read_to_string(&resolved).map_err(|err| {
-                    KeydexError::new_err(format!(
-                        "{key}: cannot read {}: {err}",
-                        resolved.display()
-                    ))
-                })?;
-                let stem = key[..key.len() - 5].to_string();
-                spec.sensitive_env.push(stem.clone());
-                env.insert(stem, contents.trim().to_string());
-                env.remove(&key);
             }
         }
 

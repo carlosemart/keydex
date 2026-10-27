@@ -157,7 +157,7 @@ exposes them. That drives the dependency choice (§17.3).
 - `*_FILE`: if `APP_DB_PASSWORD_FILE` exists **and `secret_files=True`**, the value is
   read from the file, must live under `secret_root`, and the derived key is marked
   sensitive. Off by default: without opting in, `*_FILE` variables are inert and no file is
-  read. **Implemented.**
+  read. `secret_root` and the referenced paths expand a leading `~`. **Implemented.**
 
 ### 5.4 Other sources
 
@@ -643,7 +643,7 @@ cached resolution which is implemented.
 | Artifact | Covers | Status |
 |---|---|---|
 | `abi3-py311` | 3.11, 3.12, 3.13, 3.14, 3.15 (with the GIL) | built, **not published** |
-| `cp314t` | 3.14 free-threaded, `gil_used = false` | built and tested in CI, **not published** until reads are lock-free |
+| `cp314t` | 3.14 free-threaded, `gil_used = false` | built and tested in CI, **not published** (publishing it is a deliberate change to the workflow, not a wildcard) |
 
 `abi3` and `t` are mutually exclusive today (PEP 803 `abi3t` does not exist yet): two build
 profiles with maturin.
@@ -668,9 +668,11 @@ profiles with maturin.
 3. Name reservation happens before announcing (manual action, it is a real publication).
 
 Tags drive `.github/workflows/release.yml`:
-`v*` → sdist + wheels (x86_64/aarch64, manylinux 2.28) + `cp314t` → PyPI through Trusted
-Publishing (OIDC) → `keydex-core` on crates.io through a scoped token. See
-[release](release.md).
+`v*` → the tag must equal `v` + the workspace version → sdist + `abi3` wheels
+(x86_64/aarch64, manylinux 2.28), both imported before upload → PyPI through Trusted
+Publishing (OIDC) → `keydex-core` on crates.io through a scoped token. The `cp314t` wheel is
+built, tested and kept as an artifact, but it is **not** uploaded: a PyPI filename cannot be
+taken back. See [release](release.md).
 
 ---
 

@@ -55,11 +55,19 @@ jobs:
           target: ${{ matrix.target }}
           manylinux: "2_28"
           args: --release --out dist
-      # The wheel that is about to be uploaded is the one that gets imported.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: The wheel must contain what it claims
+        run: |
+          python -m zipfile -l dist/*.whl | tee wheel.txt
+          for path in keydex/__init__.py keydex/py.typed keydex/_keydex.pyi; do
+            grep -q "$path" wheel.txt || { echo "missing $path" >&2; exit 1; }
+          done
+          grep -Eq 'keydex/_keydex.*\.so' wheel.txt || { echo "missing the extension" >&2; exit 1; }
+      # Contents are checked for every wheel; only the native one can be imported here.
       - name: The wheel must import
+        if: matrix.target == 'x86_64'
         run: |
           python -m pip install --upgrade pip
           python -m pip install --no-index dist/*.whl
